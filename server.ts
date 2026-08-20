@@ -6,7 +6,7 @@ import "dotenv/config";
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { callZfApi, decodePayload } from "./api/_core";
+import { handleProxyRequest } from "./api/zf-proxy";
 
 async function startServer() {
   const app = express();
@@ -15,21 +15,8 @@ async function startServer() {
   app.use(express.json({ limit: "2mb" }));
 
   app.post("/zf-proxy", async (req, res) => {
-    try {
-      const { payload } = req.body ?? {};
-      if (!payload || typeof payload !== "string") {
-        return res.status(400).json({ error: "Missing payload" });
-      }
-
-      const request = decodePayload(payload);
-      const { status, body } = await callZfApi(request);
-
-      console.log(`[ZF] ${request.operation} -> HTTP ${status}`);
-      return res.status(status).json(body);
-    } catch (error: any) {
-      console.error("[ZF ERROR]:", error?.message);
-      return res.status(502).json({ error: `Proxy não conseguiu falar com a API da ZF: ${error?.message}` });
-    }
+    const { status, body } = await handleProxyRequest(req.body, "[ZF]");
+    res.status(status).json(body);
   });
 
   if (process.env.NODE_ENV !== "production") {

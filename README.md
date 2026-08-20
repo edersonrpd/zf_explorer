@@ -38,10 +38,16 @@ navegador  ──POST /zf-proxy──▶  função serverless  ──GET /offers
                                 (headers client_id / client_secret)
 ```
 
-A lógica fica em `api/_core.ts` e é compartilhada entre a função serverless da
-Vercel (`api/zf-proxy.ts`) e o servidor Express de desenvolvimento (`server.ts`),
-para que local e produção não divirjam. (Arquivos com `_` no início são ignorados
-pelo builder da Vercel, então `_core.ts` não vira uma rota.)
+Tudo vive em **`api/zf-proxy.ts`**, que é deliberadamente **autocontido** — sem
+nenhum import relativo. O `server.ts` (desenvolvimento) importa `handleProxyRequest`
+desse mesmo arquivo, então local e produção tratam os mesmos erros do mesmo jeito.
+
+> ⚠️ **Não quebre isso.** O `package.json` usa `"type": "module"`, então a Vercel
+> executa a função como ESM, onde todo import relativo precisa de **extensão
+> explícita** (`"./x.js"`, não `"./x"`). Um import relativo sem extensão aqui
+> derruba a função inteira no carregamento, com `FUNCTION_INVOCATION_FAILED` /
+> `500 INTERNAL_SERVER_ERROR` antes mesmo do handler rodar — e o erro não aparece
+> em `npm run dev`, porque o tsx resolve extensões sozinho.
 
 ## Credenciais
 
@@ -97,9 +103,10 @@ O repositório já está configurado: basta importar o projeto na Vercel.
 
 ```
 api/
-  _core.ts        lógica compartilhada do proxy (monta URL, headers, trata erros)
-  zf-proxy.ts     função serverless da Vercel
-server.ts         servidor de desenvolvimento (Vite + /zf-proxy)
+  zf-proxy.ts     função serverless da Vercel + toda a lógica do proxy
+                  (monta URL, headers, trata erros). Autocontido de propósito.
+server.ts         servidor de desenvolvimento (Vite + /zf-proxy), reaproveita
+                  handleProxyRequest de api/zf-proxy.ts
 src/
   App.tsx         abas, barra de credenciais, orquestração das consultas
   components/     OfferDetail, OffersTable, JsonDrawer
