@@ -2,6 +2,26 @@ import { OfferFilters, ZfCredentials, ZfOffer } from "../types";
 
 const PROXY_URL = "/zf-proxy";
 
+/** Erro de API com o status HTTP preservado, para o crawler decidir se tenta de novo. */
+export class ZfApiError extends Error {
+  readonly status: number;
+  readonly retryAfterSeconds?: number;
+  readonly correlationId?: string;
+
+  constructor(message: string, status: number, retryAfterSeconds?: number, correlationId?: string) {
+    super(message);
+    this.name = "ZfApiError";
+    this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
+    this.correlationId = correlationId;
+  }
+
+  /** 429 e 5xx são transitórios: vale esperar e tentar de novo. */
+  get isRetryable(): boolean {
+    return this.status === 429 || this.status === 408 || this.status >= 500;
+  }
+}
+
 /**
  * Hex-encoda o payload antes de enviar ao proxy. Não é segurança — é para o
  * corpo não parecer "credencial em texto puro" para WAFs no caminho, que
@@ -21,6 +41,8 @@ function describeError(status: number, detail: string, context: string): string 
   switch (status) {
     case 400:
       return `400 Bad Request — parâmetros inválidos. ${detail}`;
+    case 429:
+      return `429 Too Many Requests — a ZF está limitando o ritmo das chamadas. ${detail}`;
     case 401:
       return `401 Unauthorized — CLIENT_ID ou CLIENT_SECRET inválidos. ${detail}`;
     case 403:
@@ -69,10 +91,12 @@ async function callProxy(request: unknown, context: string): Promise<any> {
       data?.message ||
       data?.raw ||
       (data?.errors ? JSON.stringify(data.errors) : JSON.stringify(data));
-    const error = new Error(describeError(response.status, String(detail ?? ""), context));
-    (error as Error & { status?: number }).status = response.status;
-    (error as Error & { correlationId?: string }).correlationId = data?.correlationId;
-    throw error;
+    throw new ZfApiError(
+      describeError(response.status, String(detail ?? ""), context),
+      response.status,
+      typeof data?.retryAfterSeconds === "number" ? data.retryAfterSeconds : undefined,
+      data?.correlationId,
+    );
   }
 
   return data;
@@ -95,7 +119,7 @@ export async function getOffer(
 /** GET /offers com filtros e paginação. */
 export async function getOffers(
   credentials: ZfCredentials,
-  filters: OfferFilters,
+  filters: OfferFilters | (Partial<OfferFilters> & { offset: number; limit: number }),
 ): Promise<{ offers: ZfOffer[]; correlationId?: string }> {
   const data = await callProxy(
     { operation: "getOffers", credentials, params: { filters } },

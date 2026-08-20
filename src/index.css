@@ -357,6 +357,42 @@
   .toast svg{width:16px;height:16px;color:var(--accent)}
 
   .filters-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;padding:18px}
+
+  /* ---------- Varredura do catálogo ---------- */
+  .sync-card{margin-top:22px;overflow:hidden}
+  .sync-stats{
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+    gap:18px;padding:18px 20px;align-items:center;
+  }
+  .sync-stat .sk{
+    font-size:10.5px;font-weight:700;color:var(--muted-2);
+    text-transform:uppercase;letter-spacing:.06em;
+  }
+  .sync-stat .sv{
+    font-family:var(--font-mono);font-size:22px;font-weight:700;
+    margin-top:4px;letter-spacing:-.02em;
+  }
+  .sync-stat .sv small{font-size:11px;font-weight:600;color:var(--muted);margin-left:4px}
+  .sync-state{display:flex;justify-content:flex-end}
+
+  /* A API não informa o total de registros, então a barra é indeterminada. */
+  .sync-bar{height:4px;background:var(--surface-2);overflow:hidden;position:relative}
+  .sync-bar span{
+    position:absolute;inset:0;width:32%;border-radius:4px;
+    background:linear-gradient(90deg,var(--accent),var(--accent-strong));
+    animation:sync-slide 1.3s ease-in-out infinite;
+  }
+  @keyframes sync-slide{
+    0%{left:-32%}
+    100%{left:100%}
+  }
+
+  .sync-note{
+    padding:13px 20px;font-size:12.5px;line-height:1.6;
+    border-top:1px solid var(--border);color:var(--ink-2);background:var(--surface-2);
+  }
+  .sync-note.amber{background:var(--amber-soft);color:#8a5c04;border-top-color:#f0dcb4}
+  .sync-note.rose{background:var(--rose-soft);color:#8f2436;border-top-color:#f1b9c3}
   .filters-foot{
     display:flex;align-items:center;gap:10px;padding:0 18px 18px;flex-wrap:wrap;
   }

@@ -1,65 +1,77 @@
 import { useMemo, useState } from "react";
-import { ZfOffer } from "../types";
+import { DEFAULT_SORT, SortKey, SortState, sortOffers, toggleSort } from "../lib/sortOffers";
 import { formatDate, formatPrice, formatQuantity } from "../lib/utils";
-
-type SortKey = "productOfferReference" | "merchantSku" | "brand" | "partNumber" | "quantity" | "netPrice";
+import { ZfOffer } from "../types";
 
 interface OffersTableProps {
   offers: ZfOffer[];
   selectedReference?: string;
   onSelect: (offer: ZfOffer) => void;
+  /**
+   * Ordenação controlada. O catálogo completo precisa ordenar as 6 mil ofertas
+   * antes de fatiar a página visível — se a tabela ordenasse sozinha, ordenaria
+   * só as linhas da página atual, o que dá um resultado errado e confuso.
+   * Sem estas props a tabela ordena por conta própria (usado nas listas curtas).
+   */
+  sort?: SortState;
+  onSortChange?: (sort: SortState) => void;
+  /** Quando true, as linhas já vêm ordenadas de fora. */
+  preSorted?: boolean;
 }
 
-export function OffersTable({ offers, selectedReference, onSelect }: OffersTableProps) {
-  const [sortKey, setSortKey] = useState<SortKey>("productOfferReference");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+export function OffersTable({
+  offers,
+  selectedReference,
+  onSelect,
+  sort,
+  onSortChange,
+  preSorted,
+}: OffersTableProps) {
+  const [internalSort, setInternalSort] = useState<SortState>(DEFAULT_SORT);
+  const activeSort = sort ?? internalSort;
 
-  const sorted = useMemo(() => {
-    const copy = [...offers];
-    copy.sort((a, b) => {
-      const av = a[sortKey];
-      const bv = b[sortKey];
-      // quantity e netPrice chegam como string, mas devem ordenar como número.
-      if (sortKey === "quantity" || sortKey === "netPrice") {
-        const an = Number(av ?? Number.NEGATIVE_INFINITY);
-        const bn = Number(bv ?? Number.NEGATIVE_INFINITY);
-        if (Number.isFinite(an) && Number.isFinite(bn)) return sortDir === "asc" ? an - bn : bn - an;
-      }
-      const as = String(av ?? "");
-      const bs = String(bv ?? "");
-      return sortDir === "asc" ? as.localeCompare(bs, "pt-BR") : bs.localeCompare(as, "pt-BR");
-    });
-    return copy;
-  }, [offers, sortKey, sortDir]);
+  const rows = useMemo(
+    () => (preSorted ? offers : sortOffers(offers, activeSort)),
+    [offers, activeSort, preSorted],
+  );
 
-  const toggleSort = (key: SortKey) => {
-    if (key === sortKey) {
-      setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
+  const handleSort = (key: SortKey) => {
+    const next = toggleSort(activeSort, key);
+    if (onSortChange) onSortChange(next);
+    else setInternalSort(next);
   };
 
-  const arrow = (key: SortKey) => (sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "");
+  const arrow = (key: SortKey) => (activeSort.key === key ? (activeSort.dir === "asc" ? " ↑" : " ↓") : "");
+
+  const columns: Array<{ key: SortKey; label: string; numeric?: boolean }> = [
+    { key: "productOfferReference", label: "Referência" },
+    { key: "merchantSku", label: "Merchant SKU" },
+    { key: "brand", label: "Marca" },
+    { key: "partNumber", label: "Part Number" },
+    { key: "quantity", label: "Qtd.", numeric: true },
+    { key: "netPrice", label: "Net Price", numeric: true },
+  ];
 
   return (
     <div className="table-wrap">
       <table className="data">
         <thead>
           <tr>
-            <th className="sortable" onClick={() => toggleSort("productOfferReference")}>Referência{arrow("productOfferReference")}</th>
-            <th className="sortable" onClick={() => toggleSort("merchantSku")}>Merchant SKU{arrow("merchantSku")}</th>
-            <th className="sortable" onClick={() => toggleSort("brand")}>Marca{arrow("brand")}</th>
-            <th className="sortable" onClick={() => toggleSort("partNumber")}>Part Number{arrow("partNumber")}</th>
-            <th className="sortable num" onClick={() => toggleSort("quantity")}>Qtd.{arrow("quantity")}</th>
-            <th className="sortable num" onClick={() => toggleSort("netPrice")}>Net Price{arrow("netPrice")}</th>
+            {columns.map((column) => (
+              <th
+                key={column.key}
+                className={`sortable ${column.numeric ? "num" : ""}`}
+                onClick={() => handleSort(column.key)}
+              >
+                {column.label}{arrow(column.key)}
+              </th>
+            ))}
             <th>Status</th>
             <th>Vigência</th>
           </tr>
         </thead>
         <tbody>
-          {sorted.map((offer) => (
+          {rows.map((offer) => (
             <tr
               key={offer.productOfferReference}
               className={`row ${selectedReference === offer.productOfferReference ? "selected" : ""}`}

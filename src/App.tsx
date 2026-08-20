@@ -1,15 +1,18 @@
 import { useCallback, useMemo, useState } from "react";
+import { CatalogPanel, SyncSettings } from "./components/CatalogPanel";
 import { JsonDrawer } from "./components/JsonDrawer";
 import { OfferDetail } from "./components/OfferDetail";
+import { OfferFiltersFields } from "./components/OfferFiltersFields";
 import { OffersTable } from "./components/OffersTable";
-import { BATCH_DELAY_MS, DEFAULT_FILTERS, PAGE_SIZES, STORAGE_KEYS } from "./constants";
+import { BATCH_DELAY_MS, DEFAULT_FILTERS, PAGE_SIZES, STORAGE_KEYS, SYNC_DEFAULTS } from "./constants";
+import { useCatalogSync } from "./hooks/useCatalogSync";
 import { useLocalStorage } from "./hooks/useLocalStorage";
-import { exportLookupResultsToExcel, exportOffersToExcel } from "./lib/export";
+import { exportLookupResultsToExcel, exportOffersToCsv, exportOffersToExcel } from "./lib/export";
 import { maskSecret, splitReferences } from "./lib/utils";
 import { getOffer, getOffers } from "./services/zfService";
 import { OfferFilters, OfferLookupResult, ZfCredentials, ZfOffer } from "./types";
 
-const TABS = ["Oferta Única", "Buscar Ofertas"] as const;
+const TABS = ["Oferta Única", "Buscar Ofertas", "Catálogo Completo"] as const;
 type Tab = (typeof TABS)[number];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -38,6 +41,10 @@ export default function App() {
   const [offersError, setOffersError] = useState<string | null>(null);
   const [offersCorrelationId, setOffersCorrelationId] = useState<string | undefined>();
   const [selectedOffer, setSelectedOffer] = useState<ZfOffer | null>(null);
+
+  // --- Aba "Catálogo Completo" ---
+  const sync = useCatalogSync();
+  const [syncSettings, setSyncSettings] = useLocalStorage<SyncSettings>(STORAGE_KEYS.syncSettings, SYNC_DEFAULTS);
 
   // --- UI compartilhada ---
   const [toast, setToast] = useState<string | null>(null);
@@ -184,6 +191,23 @@ export default function App() {
 
   const updateFilter = <K extends keyof OfferFilters>(key: K, value: OfferFilters[K]) =>
     setFilters({ ...filters, [key]: value });
+
+  const startCatalogSync = () => {
+    if (!hasCredentials) {
+      setShowCredentials(true);
+      displayToast("Informe o CLIENT_ID e o CLIENT_SECRET antes de baixar o catálogo.");
+      return;
+    }
+    // offset/limit da aba de busca não valem aqui — quem pagina é o crawler.
+    const { offset: _offset, limit: _limit, ...contentFilters } = filters;
+    void sync.start({
+      credentials,
+      filters: contentFilters,
+      pageSize: syncSettings.pageSize,
+      delayMs: syncSettings.delayMs,
+      maxPages: syncSettings.maxPages,
+    });
+  };
 
   const successCount = lookupResults.filter((item) => item.status === "success").length;
 
@@ -453,59 +477,7 @@ export default function App() {
           <>
             <form className="conn" onSubmit={handleSearch} style={{ marginTop: "16px" }}>
               <div className="filters-grid">
-                <div className="field">
-                  <label htmlFor="fRef">productOfferReference</label>
-                  <input
-                    id="fRef"
-                    className="input mono"
-                    placeholder="offer_MER000002-bosch__..."
-                    value={filters.productOfferReference}
-                    onChange={(e) => updateFilter("productOfferReference", e.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="fSku">merchantSku</label>
-                  <input
-                    id="fSku"
-                    className="input mono"
-                    placeholder="MER000002"
-                    value={filters.merchantSku}
-                    onChange={(e) => updateFilter("merchantSku", e.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="fBrand">brand</label>
-                  <input
-                    id="fBrand"
-                    className="input"
-                    placeholder="BOSCH"
-                    value={filters.brand}
-                    onChange={(e) => updateFilter("brand", e.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="fPart">partNumber</label>
-                  <input
-                    id="fPart"
-                    className="input mono"
-                    placeholder="0 280 156 096"
-                    value={filters.partNumber}
-                    onChange={(e) => updateFilter("partNumber", e.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="fActive">isActive</label>
-                  <select
-                    id="fActive"
-                    className="input"
-                    value={filters.isActive}
-                    onChange={(e) => updateFilter("isActive", e.target.value)}
-                  >
-                    <option value="">Todas</option>
-                    <option value="true">Somente ativas</option>
-                    <option value="false">Somente inativas</option>
-                  </select>
-                </div>
+                <OfferFiltersFields filters={filters} onChange={updateFilter} idPrefix="f" />
                 <div className="field">
                   <label htmlFor="fLimit">page[limit]</label>
                   <select
@@ -670,6 +642,60 @@ export default function App() {
                   </p>
                 </div>
               </div>
+            )}
+          </>
+        )}
+
+        {/* ---------------- Aba: Catálogo Completo ---------------- */}
+        {activeTab === "Catálogo Completo" && (
+          <>
+            <CatalogPanel
+              state={sync.state}
+              settings={syncSettings}
+              onSettingsChange={setSyncSettings}
+              filters={filters}
+              onFilterChange={updateFilter}
+              onStart={startCatalogSync}
+              onPause={sync.pause}
+              onResume={sync.resume}
+              onCancel={sync.cancel}
+              onReset={sync.reset}
+              onExportXlsx={(offers) => {
+                displayToast(`Gerando XLSX com ${offers.length.toLocaleString("pt-BR")} ofertas...`);
+                void exportOffersToExcel(offers, "ZF_Catalogo");
+              }}
+              onExportCsv={(offers) => {
+                displayToast(`Gerando CSV com ${offers.length.toLocaleString("pt-BR")} ofertas...`);
+                exportOffersToCsv(offers, "ZF_Catalogo");
+              }}
+              onSelectOffer={setSelectedOffer}
+              selectedReference={selectedOffer?.productOfferReference}
+            />
+
+            {selectedOffer && (
+              <>
+                <div className="results-head">
+                  <h1>
+                    Oferta <span>{selectedOffer.productOfferReference}</span>
+                  </h1>
+                  <div className="results-actions">
+                    <button className="btn btn-ghost" onClick={() => setSelectedOffer(null)}>
+                      Fechar detalhe
+                    </button>
+                  </div>
+                </div>
+                <OfferDetail
+                  offer={selectedOffer}
+                  onCopy={copyToClipboard}
+                  onOpenJson={() =>
+                    setJsonDrawer({
+                      data: selectedOffer,
+                      title: "Oferta (item do catálogo)",
+                      subtitle: selectedOffer.productOfferReference,
+                    })
+                  }
+                />
+              </>
             )}
           </>
         )}

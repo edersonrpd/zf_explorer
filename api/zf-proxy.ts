@@ -150,6 +150,15 @@ export async function callZfApi(request: ZfProxyRequest): Promise<ZfProxyResult>
   const response = await fetch(url, { method: "GET", headers, redirect: "follow" });
   const text = await response.text();
 
+  // Em 429/503 a ZF pode indicar quanto esperar. Repassamos para o cliente
+  // conseguir respeitar o ritmo dela em vez de chutar um backoff.
+  const retryAfterHeader = response.headers.get("retry-after");
+  const retryAfter = retryAfterHeader ? Number(retryAfterHeader) : undefined;
+  const meta: Record<string, unknown> = { correlationId };
+  if (retryAfter !== undefined && Number.isFinite(retryAfter)) {
+    meta.retryAfterSeconds = retryAfter;
+  }
+
   let parsed: unknown;
   try {
     parsed = text ? JSON.parse(text) : null;
@@ -161,18 +170,18 @@ export async function callZfApi(request: ZfProxyRequest): Promise<ZfProxyResult>
       body: {
         error: `A API retornou uma resposta não-JSON (HTTP ${response.status}).`,
         raw: text.slice(0, 800),
-        correlationId,
+        ...meta,
       },
     };
   }
 
   if (Array.isArray(parsed)) {
-    return { status: response.status, body: { data: parsed, correlationId } };
+    return { status: response.status, body: { data: parsed, ...meta } };
   }
 
   return {
     status: response.status,
-    body: { ...(parsed as Record<string, unknown> | null ?? {}), correlationId },
+    body: { ...(parsed as Record<string, unknown> | null ?? {}), ...meta },
   };
 }
 

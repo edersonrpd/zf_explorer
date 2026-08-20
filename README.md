@@ -12,6 +12,7 @@ Aplicação **Vite + React + TypeScript** para consultar as ofertas da API
 | --- | --- | --- |
 | **Oferta Única** | `GET /offers/:productOfferReference` | consulta uma ou **várias** referências de uma vez (cola da planilha, separadas por vírgula ou quebra de linha), tabela-resumo com status por referência, detalhe completo da oferta, export XLSX |
 | **Buscar Ofertas** | `GET /offers` | filtros por `productOfferReference`, `merchantSku`, `brand`, `partNumber` e `isActive`, paginação `page[offset]` / `page[limit]`, ordenação por coluna, export XLSX |
+| **Catálogo Completo** | `GET /offers` (varredura) | baixa **todas** as ofertas da conta página a página, com pausa configurável entre chamadas, pausar/retomar/parar, progresso ao vivo e export CSV/XLSX — inclusive do parcial |
 
 Em ambas as abas há o drawer **Ver JSON** com a resposta crua da API e o
 `x-correlation-id` da requisição — é o identificador que o suporte da ZF pede
@@ -109,11 +110,50 @@ server.ts         servidor de desenvolvimento (Vite + /zf-proxy), reaproveita
                   handleProxyRequest de api/zf-proxy.ts
 src/
   App.tsx         abas, barra de credenciais, orquestração das consultas
-  components/     OfferDetail, OffersTable, JsonDrawer
+  components/     OfferDetail, OffersTable, JsonDrawer, CatalogPanel,
+                  OfferFiltersFields
+  hooks/          useCatalogSync — orquestra a varredura (pausar/retomar/parar)
+  lib/crawlOffers.ts  varredura paginada do catálogo, com backoff e dedupe
   services/       zfService — chama o proxy e traduz os status HTTP da ZF
   lib/            utils (formatação BRL/datas) e export XLSX
   types.ts        contrato da oferta
 ```
+
+## Baixando o catálogo inteiro
+
+A aba **Catálogo Completo** existe para contas grandes (milhares de ofertas).
+Ela percorre `GET /offers` em sequência, acumulando o resultado, e foi desenhada
+para **não sobrecarregar a API**:
+
+- **Uma chamada por vez**, nunca em paralelo, com **pausa configurável** entre
+  páginas (padrão 400 ms). Com 6 mil ofertas e 200 por página, são ~30 chamadas.
+- **Backoff exponencial** em 429 e 5xx, respeitando o header `Retry-After` da ZF
+  quando ele vem. Erros definitivos (401, 403, 400) abortam na hora, em vez de
+  insistir à toa.
+- **Pausar / retomar / parar** a qualquer momento. O que já foi baixado continua
+  disponível para exportar — parar não joga fora o progresso.
+- A tabela mostra **50 linhas por vez**, com busca e ordenação locais sobre o
+  conjunto inteiro (sem gerar novas chamadas). Jogar 6 mil linhas no DOM
+  travaria a aba.
+
+### Três armadilhas da paginação da ZF
+
+A API pagina por offset/limit e devolve um **array puro** — sem total de
+registros e sem cursor. Isso obriga a cuidados que não são óbvios, e todos estão
+cobertos em `src/lib/crawlOffers.ts`:
+
+1. **O offset avança pelo número de itens realmente recebidos**, não pelo
+   `pageSize` pedido. Se a ZF tiver um teto próprio de página (pedimos 200 e ela
+   devolve 50), avançar pelo valor pedido pularia 150 ofertas a cada volta — o
+   download sairia com buracos silenciosos.
+2. **A parada é na página vazia**, não em "página menor que o limite". Pelo mesmo
+   motivo: uma API que limita a página devolveria sempre menos que o pedido, e a
+   varredura terminaria logo na primeira.
+3. **Dedupe por `productOfferReference`.** Se a API ignorar o offset, as mesmas
+   ofertas voltam para sempre. Uma página inteira sem nenhuma referência nova
+   encerra a varredura com o aviso "sem-novidade".
+
+Há ainda um teto de páginas configurável (padrão 500) como rede de segurança.
 
 ## Notas sobre a API
 
@@ -125,6 +165,9 @@ src/
   quando a página volta com menos itens que o `limit`.
 - Part numbers têm espaços (`0 280 156 096`); a querystring usa `%20` em vez de
   `+` porque nem todo gateway trata `+` como espaço.
+- O CSV usa `;` como separador e **vírgula decimal**, que é o que o Excel em
+  pt-BR espera — com ponto, `1000.00` seria lido como texto ou como 100000. O
+  XLSX mantém os valores numéricos de verdade.
 - O payload enviado ao proxy vai hex-encodado. Isso **não é criptografia** — é só
   para o corpo não parecer "credencial em texto puro" para WAFs no caminho, que
   respondem HTML e quebram o parse do cliente. Mesma técnica do `amz-api-explorer`.
