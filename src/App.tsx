@@ -4,15 +4,18 @@ import { JsonDrawer } from "./components/JsonDrawer";
 import { OfferDetail } from "./components/OfferDetail";
 import { OfferFiltersFields } from "./components/OfferFiltersFields";
 import { OffersTable } from "./components/OffersTable";
-import { BATCH_DELAY_MS, DEFAULT_FILTERS, PAGE_SIZES, STORAGE_KEYS, SYNC_DEFAULTS } from "./constants";
+import { BATCH_DELAY_MS, DEFAULT_FILTERS, DEFAULT_ORDER_FILTERS, PAGE_SIZES, STORAGE_KEYS, SYNC_DEFAULTS } from "./constants";
 import { useCatalogSync } from "./hooks/useCatalogSync";
+import { useOrderDetails } from "./hooks/useOrderDetails";
+import { OrderDetail } from "./components/OrderDetail";
+import { OrdersPanel } from "./components/OrdersPanel";
 import { useLocalStorage } from "./hooks/useLocalStorage";
-import { exportLookupResultsToExcel, exportOffersToCsv, exportOffersToExcel } from "./lib/export";
-import { maskSecret, splitReferences } from "./lib/utils";
-import { getOffer, getOffers } from "./services/zfService";
-import { OfferFilters, OfferLookupResult, ZfCredentials, ZfOffer } from "./types";
+import { exportLookupResultsToExcel, exportOffersToCsv, exportOffersToExcel, exportOrderItemsToCsv, exportOrdersToCsv, exportOrdersToExcel } from "./lib/export";
+import { localDateToUtcParam, maskSecret, splitReferences } from "./lib/utils";
+import { getOffer, getOffers, getOrders } from "./services/zfService";
+import { OfferFilters, OfferLookupResult, OrderFilters, ZfCredentials, ZfOffer, ZfOrderSummary } from "./types";
 
-const TABS = ["Oferta Única", "Buscar Ofertas", "Catálogo Completo"] as const;
+const TABS = ["Oferta Única", "Buscar Ofertas", "Catálogo Completo", "Pedidos"] as const;
 type Tab = (typeof TABS)[number];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -43,7 +46,20 @@ export default function App() {
   const [selectedOffer, setSelectedOffer] = useState<ZfOffer | null>(null);
 
   // --- Aba "Catálogo Completo" ---
-  const sync = useCatalogSync();
+  const sync = useCatalogSync<ZfOffer>();
+
+  // --- Aba "Pedidos" ---
+  const [orderFilters, setOrderFilters] = useLocalStorage<OrderFilters>(
+    STORAGE_KEYS.orderFilters,
+    DEFAULT_ORDER_FILTERS,
+  );
+  const [orders, setOrders] = useState<ZfOrderSummary[]>([]);
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
+  const [selectedOrderRef, setSelectedOrderRef] = useState<string | null>(null);
+  const orderSync = useCatalogSync<ZfOrderSummary>();
+  const orderDetails = useOrderDetails(credentials);
   const [syncSettings, setSyncSettings] = useLocalStorage<SyncSettings>(STORAGE_KEYS.syncSettings, SYNC_DEFAULTS);
 
   // --- UI compartilhada ---
@@ -215,12 +231,104 @@ export default function App() {
     // offset/limit da aba de busca não valem aqui — quem pagina é o crawler.
     const { offset: _offset, limit: _limit, ...contentFilters } = filters;
     void sync.start({
-      credentials,
-      filters: contentFilters,
+      fetchPage: async (offset, limit) => {
+        const { offers: page } = await getOffers(credentials, { ...contentFilters, offset, limit });
+        return page;
+      },
+      keyOf: (offer) => offer.productOfferReference,
       pageSize: syncSettings.pageSize,
       delayMs: syncSettings.delayMs,
       maxPages: syncSettings.maxPages,
     });
+  };
+
+  /**
+   * Converte os filtros da tela para o que a API espera: as datas vêm do
+   * calendário local do usuário e precisam virar limites em UTC.
+   */
+  const toApiOrderFilters = (source: OrderFilters, offset: number) => ({
+    createdFrom: localDateToUtcParam(source.createdFrom, "start"),
+    createdTo: localDateToUtcParam(source.createdTo, "end"),
+    state: source.state,
+    offset,
+    limit: source.limit,
+  });
+
+  const requireCredentials = (message: string): boolean => {
+    if (hasCredentials) return true;
+    setShowCredentials(true);
+    displayToast(message);
+    return false;
+  };
+
+  const runOrderSearch = async (next: OrderFilters) => {
+    if (!requireCredentials("Informe o CLIENT_ID e o CLIENT_SECRET antes de consultar pedidos.")) return;
+
+    setOrdersError(null);
+    setOrdersLoading(true);
+    setSelectedOrderRef(null);
+    orderSync.reset();
+    try {
+      const { orders: page } = await getOrders(credentials, toApiOrderFilters(next, next.offset));
+      setOrders(page);
+      setOrdersLoaded(true);
+      displayToast(`${page.length} pedido(s) retornado(s).`);
+    } catch (error) {
+      setOrders([]);
+      setOrdersLoaded(true);
+      setOrdersError((error as Error).message);
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
+  const handleOrderSearch = () => {
+    const next = { ...orderFilters, offset: 0 };
+    setOrderFilters(next);
+    void runOrderSearch(next);
+  };
+
+  const handleOrderPage = (direction: -1 | 1) => {
+    const next = { ...orderFilters, offset: Math.max(0, orderFilters.offset + direction * orderFilters.limit) };
+    setOrderFilters(next);
+    void runOrderSearch(next);
+  };
+
+  /** Varre todas as páginas do período, reaproveitando o crawler das ofertas. */
+  const handleDownloadAllOrders = () => {
+    if (!requireCredentials("Informe o CLIENT_ID e o CLIENT_SECRET antes de baixar pedidos.")) return;
+
+    setOrdersError(null);
+    setSelectedOrderRef(null);
+    setOrders([]);
+    setOrdersLoaded(true);
+    void orderSync.start({
+      fetchPage: async (offset, limit) => {
+        const { orders: page } = await getOrders(credentials, {
+          ...toApiOrderFilters(orderFilters, offset),
+          limit,
+        });
+        return page;
+      },
+      keyOf: (order) => order.merchantOrderReference,
+      pageSize: orderFilters.limit,
+      delayMs: syncSettings.delayMs,
+      maxPages: syncSettings.maxPages,
+    });
+  };
+
+  // Enquanto a varredura roda, a lista exibida é a que o crawler acumulou.
+  const visibleOrders = orderSync.state.status === "idle" ? orders : orderSync.state.items;
+
+  const toggleSelectedOrder = (order: ZfOrderSummary) => {
+    const reference = order.merchantOrderReference;
+    if (selectedOrderRef === reference) {
+      setSelectedOrderRef(null);
+      return;
+    }
+    setSelectedOrderRef(reference);
+    // A listagem não traz itens: abrir o pedido dispara (e cacheia) o detalhe.
+    void orderDetails.load(reference);
   };
 
   const successCount = lookupResults.filter((item) => item.status === "success").length;
@@ -727,6 +835,73 @@ export default function App() {
             />
 
           </>
+        )}
+
+        {activeTab === "Pedidos" && (
+          <OrdersPanel
+            filters={orderFilters}
+            onFilterChange={(key, value) => setOrderFilters({ ...orderFilters, [key]: value })}
+            orders={visibleOrders}
+            loaded={ordersLoaded}
+            loading={ordersLoading}
+            error={ordersError}
+            sync={orderSync.state}
+            bulk={orderDetails.bulk}
+            detailsLoadedCount={orderDetails.loadedOrders().size}
+            onSearch={handleOrderSearch}
+            onDownloadAll={handleDownloadAllOrders}
+            onCancelDownload={orderSync.cancel}
+            onClear={() => {
+              setOrders([]);
+              setOrdersLoaded(false);
+              setOrdersError(null);
+              setSelectedOrderRef(null);
+              setOrderFilters(DEFAULT_ORDER_FILTERS);
+              orderSync.reset();
+              orderDetails.reset();
+            }}
+            onPage={handleOrderPage}
+            onLoadAllDetails={() => {
+              displayToast("Carregando itens dos pedidos...");
+              void orderDetails.loadMany(visibleOrders, BATCH_DELAY_MS);
+            }}
+            onStopBulk={orderDetails.stopBulk}
+            onExportXlsx={() => {
+              displayToast("Gerando XLSX...");
+              void exportOrdersToExcel(visibleOrders, orderDetails.loadedOrders());
+            }}
+            onExportCsv={() => {
+              displayToast("Gerando CSV...");
+              exportOrdersToCsv(visibleOrders, orderDetails.loadedOrders());
+            }}
+            onExportItemsCsv={() => {
+              displayToast("Gerando CSV de itens...");
+              exportOrderItemsToCsv(visibleOrders, orderDetails.loadedOrders());
+            }}
+            onSelectOrder={toggleSelectedOrder}
+            selectedReference={selectedOrderRef ?? undefined}
+            renderExpanded={(order) => {
+              const entry = orderDetails.details.get(order.merchantOrderReference);
+              return (
+                <OrderDetail
+                  // Sem o detalhe carregado, mostra o que a listagem já trouxe.
+                  order={entry?.order ?? order}
+                  loading={entry?.loading}
+                  error={entry?.error}
+                  correlationId={entry?.correlationId}
+                  onCopy={copyToClipboard}
+                  onRetry={() => void orderDetails.load(order.merchantOrderReference, { force: true })}
+                  onOpenJson={() =>
+                    setJsonDrawer({
+                      data: entry?.order ?? order,
+                      title: entry?.order ? "GET /orders/:merchantOrderReference" : "Pedido (item da lista)",
+                      subtitle: order.merchantOrderReference,
+                    })
+                  }
+                />
+              );
+            }}
+          />
         )}
       </div>
 

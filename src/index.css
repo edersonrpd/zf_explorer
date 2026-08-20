@@ -282,8 +282,13 @@
   .chev svg{width:15px;height:15px}
   .chev.open{transform:rotate(180deg);color:var(--accent-strong)}
 
-  .data tr.detail-row:hover{background:none}
-  .data tr.detail-row td{
+  /*
+   * Combinador de filho, não descendente: o detalhe expandido contém tabelas
+   * próprias (itens do pedido, campos extras da oferta) e um seletor
+   * descendente pintaria a borda de destaque em cada célula dessas tabelas.
+   */
+  .data > tbody > tr.detail-row:hover{background:none}
+  .data > tbody > tr.detail-row > td{
     padding:0;background:var(--surface-2);
     border-bottom:1px solid var(--border-strong);
     border-left:3px solid var(--accent);
@@ -390,6 +395,53 @@
   }
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   .toast svg{width:16px;height:16px;color:var(--accent)}
+
+  /* ---------- Chips de filtro ---------- */
+  .status-pills{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+  .spill{
+    border:1px solid var(--border-strong);background:var(--surface);
+    border-radius:20px;padding:6px 13px;font-size:11.5px;font-weight:700;
+    color:var(--muted);letter-spacing:.02em;transition:.15s;font-family:var(--font-mono);
+  }
+  .spill:hover:not(:disabled){border-color:var(--muted-2);color:var(--ink-2)}
+  .spill.on{border-color:var(--accent);color:var(--accent-strong);background:var(--accent-soft)}
+  .spill:disabled{opacity:.5;cursor:not-allowed}
+
+  /* ---------- Pedidos ---------- */
+  .orders-summary{
+    display:flex;gap:34px;flex-wrap:wrap;
+    padding:16px 20px;border-bottom:1px solid var(--border);background:var(--surface-2);
+  }
+  .state-badges{display:flex;gap:5px;flex-wrap:wrap;max-width:220px}
+
+  .order-loading{
+    display:flex;align-items:center;gap:10px;
+    padding:26px 20px;font-size:13px;color:var(--muted);font-weight:600;
+  }
+
+  .totals-rows{padding:0 22px 22px}
+  .totals-row{
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:9px 0;border-top:1px solid rgba(255,255,255,.08);
+  }
+  .totals-row .tk{font-size:11.5px;color:#9fb0c7;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .totals-row .tv{font-family:var(--font-mono);font-size:13.5px;font-weight:600;color:#fff}
+
+  .kv{display:flex;align-items:baseline;gap:12px;padding:7px 0}
+  .kv + .kv{border-top:1px solid var(--border)}
+  .kv .kk{
+    flex:0 0 92px;font-size:11px;font-weight:600;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.04em;
+  }
+  .kv .kvv{flex:1;min-width:0;font-size:13px;font-weight:500;word-break:break-word}
+  .kv .kvv.mono{font-family:var(--font-mono);font-size:12.5px}
+
+  .addr{font-size:12.5px;color:var(--ink-2);line-height:1.7}
+  .ship-block + .ship-block{margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}
+  .ship-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .ship-carrier{font-size:13px;font-weight:600}
+  .ship-ref{font-size:11.5px;color:var(--muted)}
+  .ship-items{font-size:11.5px;color:var(--muted);margin-top:6px}
 
   .filters-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;padding:18px}
 

@@ -1,4 +1,4 @@
-import { OfferFilters, ZfCredentials, ZfOffer } from "../types";
+import { OfferFilters, OrderFilters, ZfCredentials, ZfOffer, ZfOrder, ZfOrderSummary } from "../types";
 
 const PROXY_URL = "/zf-proxy";
 
@@ -131,4 +131,34 @@ export async function getOffers(
   const raw = Array.isArray(data) ? data : data?.data;
   const offers = Array.isArray(raw) ? (raw as ZfOffer[]) : [];
   return { offers, correlationId: data?.correlationId };
+}
+
+/** GET /orders/:merchantOrderReference — o único lugar que traz os itens do pedido. */
+export async function getOrder(
+  credentials: ZfCredentials,
+  merchantOrderReference: string,
+): Promise<{ order: ZfOrder; correlationId?: string }> {
+  const data = await callProxy(
+    { operation: "getOrder", credentials, params: { merchantOrderReference } },
+    `o pedido '${merchantOrderReference}'`,
+  );
+  const { correlationId, ...order } = data ?? {};
+  return { order: order as ZfOrder, correlationId };
+}
+
+/**
+ * GET /orders. Recebe os filtros já em UTC — a conversão do calendário local
+ * acontece na camada de tela, que é quem sabe o fuso do usuário.
+ */
+export async function getOrders(
+  credentials: ZfCredentials,
+  orderFilters: { createdFrom?: string; createdTo?: string; state?: string[]; offset: number; limit: number },
+): Promise<{ orders: ZfOrderSummary[]; correlationId?: string }> {
+  const data = await callProxy(
+    { operation: "getOrders", credentials, params: { orderFilters } },
+    "a lista de pedidos",
+  );
+  const raw = Array.isArray(data) ? data : data?.data;
+  const orders = Array.isArray(raw) ? (raw as ZfOrderSummary[]) : [];
+  return { orders, correlationId: data?.correlationId };
 }

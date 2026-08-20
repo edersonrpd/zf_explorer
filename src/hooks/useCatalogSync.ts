@@ -1,12 +1,11 @@
 import { useCallback, useRef, useState } from "react";
-import { CrawlProgress, CrawlStopReason, SkippedRecord, crawlAllOffers } from "../lib/crawlOffers";
-import { OfferFilters, ZfCredentials, ZfOffer } from "../types";
+import { CrawlProgress, CrawlStopReason, SkippedRecord, crawlAll } from "../lib/crawl";
 
 export type SyncStatus = "idle" | "running" | "paused" | "done" | "error";
 
-export interface SyncState {
+export interface SyncState<T> {
   status: SyncStatus;
-  offers: ZfOffer[];
+  items: T[];
   pagesRead: number;
   requestCount: number;
   /** Cai abaixo do configurado quando o crawler está isolando um registro ruim. */
@@ -21,9 +20,9 @@ export interface SyncState {
   recovering?: CrawlProgress["recovering"];
 }
 
-const INITIAL: SyncState = {
+const INITIAL: SyncState<never> = {
   status: "idle",
-  offers: [],
+  items: [],
   pagesRead: 0,
   requestCount: 0,
   currentPageSize: 0,
@@ -32,9 +31,9 @@ const INITIAL: SyncState = {
   elapsedMs: 0,
 };
 
-export interface StartOptions {
-  credentials: ZfCredentials;
-  filters: Partial<OfferFilters>;
+export interface StartOptions<T> {
+  fetchPage: (offset: number, limit: number) => Promise<T[]>;
+  keyOf: (item: T) => string | undefined;
   pageSize: number;
   delayMs: number;
   maxPages: number;
@@ -47,10 +46,10 @@ export interface StartOptions {
  * página. Com 6 mil registros, re-renderizar a cada oferta travaria a aba; a
  * cada página o React tem folga de sobra.
  */
-export function useCatalogSync() {
-  const [state, setState] = useState<SyncState>(INITIAL);
+export function useCatalogSync<T>() {
+  const [state, setState] = useState<SyncState<T>>(INITIAL);
 
-  const bufferRef = useRef<ZfOffer[]>([]);
+  const bufferRef = useRef<T[]>([]);
   const cancelRef = useRef(false);
   const pauseRef = useRef(false);
   const runningRef = useRef(false);
@@ -62,7 +61,7 @@ export function useCatalogSync() {
   }, []);
 
   const start = useCallback(
-    async ({ credentials, filters, pageSize, delayMs, maxPages }: StartOptions) => {
+    async ({ fetchPage, keyOf, pageSize, delayMs, maxPages }: StartOptions<T>) => {
       if (runningRef.current) return;
       runningRef.current = true;
       cancelRef.current = false;
@@ -72,20 +71,20 @@ export function useCatalogSync() {
       const startedAt = Date.now();
       setState({ ...INITIAL, status: "running", startedAt, currentPageSize: pageSize });
 
-      const result = await crawlAllOffers({
-        credentials,
-        filters,
+      const result = await crawlAll<T>({
+        fetchPage,
+        keyOf,
         pageSize,
         delayMs,
         maxPages,
         isCancelled: () => cancelRef.current,
         waitWhilePaused,
-        onPage: (newOffers, progress) => {
-          if (newOffers.length > 0) bufferRef.current = bufferRef.current.concat(newOffers);
+        onPage: (newItems, progress) => {
+          if (newItems.length > 0) bufferRef.current = bufferRef.current.concat(newItems);
           setState((prev) => ({
             ...prev,
             status: pauseRef.current ? "paused" : "running",
-            offers: bufferRef.current,
+            items: bufferRef.current,
             pagesRead: progress.pagesRead,
             requestCount: progress.requestCount,
             currentPageSize: progress.currentPageSize,
@@ -101,7 +100,7 @@ export function useCatalogSync() {
       setState((prev) => ({
         ...prev,
         status: result.stopReason === "erro" ? "error" : "done",
-        offers: result.offers,
+        items: result.items,
         pagesRead: result.pagesRead,
         requestCount: result.requestCount,
         skipped: result.skipped,

@@ -11,6 +11,7 @@ Aplicação **Vite + React + TypeScript** para consultar as ofertas da API
 | Aba | Endpoint | Recursos |
 | --- | --- | --- |
 | **Oferta Única** | `GET /offers/:productOfferReference` | consulta uma ou **várias** referências de uma vez (cola da planilha, separadas por vírgula ou quebra de linha), tabela-resumo com status por referência, detalhe completo da oferta, export XLSX |
+| **Pedidos** | `GET /orders` + `GET /orders/:merchantOrderReference` | filtro por período e estado, paginação ou download do período inteiro, detalhe com itens/entregas/cliente aberto na própria linha, export XLSX (abas Pedidos + Itens) e CSV |
 | **Buscar Ofertas** | `GET /offers` | filtros por `productOfferReference`, `merchantSku`, `brand`, `partNumber` e `isActive`, paginação `page[offset]` / `page[limit]`, ordenação por coluna, export XLSX |
 | **Catálogo Completo** | `GET /offers` (varredura) | baixa **todas** as ofertas da conta página a página, com pausa configurável entre chamadas, pausar/retomar/parar, progresso ao vivo e export CSV/XLSX — inclusive do parcial |
 
@@ -204,3 +205,52 @@ como completa é o pior resultado possível: silenciosamente errada.
 - O payload enviado ao proxy vai hex-encodado. Isso **não é criptografia** — é só
   para o corpo não parecer "credencial em texto puro" para WAFs no caminho, que
   respondem HTML e quebram o parse do cliente. Mesma técnica do `amz-api-explorer`.
+
+
+## Pedidos
+
+### A listagem não traz os itens
+
+`GET /orders` devolve uma versão enxuta do pedido: **sem `items`, sem
+`billingAddress` e sem `settlementDate`**, e com os `shipments` sem endereço.
+Ver os itens exige `GET /orders/:merchantOrderReference`, uma chamada por
+pedido.
+
+Por isso o detalhe é carregado sob demanda, ao abrir a linha, e fica em cache:
+reabrir um pedido já visto não gera tráfego novo. O botão "Carregar itens de
+todos" busca os detalhes que faltam em sequência (não em paralelo, para não
+tomar 429), e a partir daí a aba "Itens" do XLSX e o "CSV itens" saem completos.
+
+### Datas são UTC — e isso não é detalhe
+
+A documentação diz que `createdAt`, `updatedAt` e `settlementDate` vêm em UTC,
+no formato `2024-04-01 23:59:59`. Duas armadilhas:
+
+**Ao exibir.** `new Date("2024-04-01T23:59:59")` interpreta a string como
+horário **local**, não UTC — é o que a especificação manda para data-hora sem
+offset. No Brasil isso mostraria todo pedido 3 horas adiantado, e um pedido do
+fim do dia apareceria no dia seguinte. `parseUtcDate()` acrescenta o `Z`
+explicitamente.
+
+**Ao filtrar.** O `<input type="date">` devolve a data do calendário local do
+usuário; a API espera limites em UTC. Filtrar "01/04 a 30/04" sem converter
+perderia os pedidos feitos depois das 21h do dia 30, que em UTC já estão em
+maio. `localDateToUtcParam()` converte `2024-04-30` (fim do dia, UTC-3) em
+`2024-05-01 02:59:59`.
+
+### filter[proPartsOrders.state] é multivalorado
+
+É o único filtro repetível da API — vários estados se especificam repetindo a
+chave. O proxy usa `append`, não `set`: um `set` sobrescreveria e só o último
+estado seria enviado, filtrando errado **sem dar nenhum erro**.
+
+A ZF não publica a lista fechada de estados. A tela oferece os documentados
+(`new`, `canceled`, `waiting for documents`) e acrescenta os que aparecerem nos
+pedidos carregados.
+
+### Reaproveitamento
+
+"Baixar todos do período" usa o mesmo crawler do catálogo de ofertas — que foi
+generalizado para qualquer entidade (`crawlAll<T>`). Pedidos ganham de graça o
+avanço de offset por itens recebidos, a deduplicação e a recuperação de
+registros corrompidos descrita acima.

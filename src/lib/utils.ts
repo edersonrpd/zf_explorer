@@ -45,3 +45,60 @@ export function maskSecret(value: string): string {
   if (value.length <= 8) return "•".repeat(value.length);
   return `${value.slice(0, 4)}${"•".repeat(6)}${value.slice(-4)}`;
 }
+
+/**
+ * Datas de pedido vêm em UTC ("2024-04-01 23:59:59", sem indicador de fuso).
+ *
+ * `new Date("2024-04-01T23:59:59")` interpreta a string como horário **local**,
+ * não UTC — é o comportamento que a especificação manda para data-hora sem
+ * offset. No Brasil (UTC-3) isso mostraria todo pedido 3 horas adiantado, e um
+ * pedido do fim do dia apareceria no dia seguinte. Daí o "Z" explícito.
+ */
+export function parseUtcDate(value?: string | null): Date | null {
+  if (!value) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  // Se já vier com fuso (Z ou ±HH:MM), respeita o que veio.
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(text);
+  const date = new Date(hasZone ? text.replace(" ", "T") : `${text.replace(" ", "T")}Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Data/hora de pedido, convertida de UTC para o fuso do navegador. */
+export function formatDateUtc(value?: string | null): string {
+  if (!value) return "—";
+  const date = parseUtcDate(value);
+  if (!date) return String(value);
+  return date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+/** Só a data, para colunas de tabela onde a hora é ruído. */
+export function formatDayUtc(value?: string | null): string {
+  if (!value) return "—";
+  const date = parseUtcDate(value);
+  if (!date) return String(value);
+  return date.toLocaleDateString("pt-BR", { dateStyle: "short" });
+}
+
+/**
+ * Converte a data escolhida no <input type="date"> (calendário local) para o
+ * "YYYY-MM-DD HH:MM:SS" em UTC que a API espera.
+ *
+ * Sem essa conversão, filtrar "01/04 a 30/04" no Brasil perderia os pedidos
+ * feitos depois das 21h do dia 30 — eles já estão no dia 1º em UTC.
+ */
+export function localDateToUtcParam(date: string, edge: "start" | "end"): string {
+  if (!date) return "";
+  const [year, month, day] = date.split("-").map(Number);
+  if (!year || !month || !day) return "";
+
+  const local = edge === "start"
+    ? new Date(year, month - 1, day, 0, 0, 0)
+    : new Date(year, month - 1, day, 23, 59, 59);
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())} ` +
+    `${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}`
+  );
+}

@@ -1,6 +1,6 @@
 // xlsx é pesado (~400 kB) e só é necessário quando o usuário exporta.
 // O import dinâmico mantém isso fora do bundle inicial.
-import { OfferLookupResult, ZfOffer } from "../types";
+import { OfferLookupResult, ZfOffer, ZfOrder, ZfOrderSummary } from "../types";
 
 const HEADER = [
   "productOfferReference",
@@ -104,4 +104,164 @@ export function exportOffersToCsv(offers: ZfOffer[], filenamePrefix = "ZF_Oferta
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+/* ------------------------------------------------------------------ */
+/* Pedidos                                                             */
+/* ------------------------------------------------------------------ */
+
+const ORDER_HEADER = [
+  "merchantOrderReference",
+  "createdAt",
+  "updatedAt",
+  "paymentMethod",
+  "itemStates",
+  "itemCount",
+  "customerName",
+  "customerCompany",
+  "customerCnpj",
+  "customerIe",
+  "customerEmail",
+  "customerReference",
+  "totalSubtotal",
+  "totalDiscount",
+  "totalOrderExpense",
+  "totalGrand",
+  "totalCommission",
+  "totalCanceled",
+  "totalRefundable",
+  "carriers",
+  "settlementDate",
+];
+
+const ITEM_HEADER = [
+  "merchantOrderReference",
+  "createdAt",
+  "merchantOrderItemReference",
+  "state",
+  "sku",
+  "productName",
+  "brand",
+  "partNumber",
+  "quantity",
+  "unitPrice",
+  "sumPrice",
+  "sumPriceToPay",
+  "discountTotal",
+  "notaFiscal",
+  "trackingLink",
+];
+
+/** Números como número para o Excel somar; datas ficam como vieram (UTC). */
+const num = (value?: string | number | null) =>
+  value === undefined || value === null || value === "" ? "" : Number(String(value).replace(",", "."));
+
+function orderToRow(order: ZfOrderSummary): Record<string, unknown> {
+  const totals = order.totals ?? {};
+  return {
+    merchantOrderReference: order.merchantOrderReference ?? "",
+    createdAt: order.createdAt ?? "",
+    updatedAt: order.updatedAt ?? "",
+    paymentMethod: order.paymentMethod ?? "",
+    itemStates: (order.itemStates ?? []).join(", "),
+    itemCount: order.itemCount ?? "",
+    customerName: order.customer?.fullName ?? "",
+    customerCompany: order.customer?.companyName ?? "",
+    customerCnpj: order.customer?.cnpj ?? "",
+    customerIe: order.customer?.ie ?? "",
+    customerEmail: order.customer?.email ?? "",
+    customerReference: order.customer?.customerReference ?? "",
+    totalSubtotal: num(totals.subtotal),
+    totalDiscount: num(totals.discount),
+    totalOrderExpense: num(totals.orderExpense),
+    totalGrand: num(totals.grand),
+    totalCommission: num(totals.commission),
+    totalCanceled: num(totals.canceled),
+    totalRefundable: num(totals.refundable),
+    carriers: (order.shipments ?? []).map((s) => s.carrierName || s.name).filter(Boolean).join(", "),
+    settlementDate: (order as ZfOrder).settlementDate ?? "",
+  };
+}
+
+function itemRows(order: ZfOrder): Record<string, unknown>[] {
+  return (order.items ?? []).map((item) => ({
+    merchantOrderReference: order.merchantOrderReference ?? "",
+    createdAt: order.createdAt ?? "",
+    merchantOrderItemReference: item.merchantOrderItemReference ?? "",
+    state: item.state ?? "",
+    sku: item.product?.sku ?? "",
+    productName: item.product?.name ?? "",
+    brand: item.product?.brand ?? "",
+    partNumber: item.product?.partNumber ?? "",
+    quantity: num(item.quantity),
+    unitPrice: num(item.totals?.unitPrice),
+    sumPrice: num(item.totals?.sumPrice),
+    sumPriceToPay: num(item.totals?.sumPriceToPay),
+    discountTotal: num(item.totals?.discountTotal),
+    notaFiscal: item.notaFiscal ?? "",
+    trackingLink: item.trackingLink ?? "",
+  }));
+}
+
+/**
+ * XLSX de pedidos. A aba "Itens" só é criada com os pedidos cujo detalhe já foi
+ * carregado — a listagem da API não traz itens, então exportar itens de um
+ * pedido não aberto exigiria uma chamada por pedido.
+ */
+export async function exportOrdersToExcel(
+  orders: ZfOrderSummary[],
+  details: Map<string, ZfOrder>,
+  filenamePrefix = "ZF_Pedidos",
+) {
+  const XLSX = await import("xlsx");
+  const wb = XLSX.utils.book_new();
+
+  const ordersSheet = XLSX.utils.json_to_sheet(
+    orders.map((order) => orderToRow(details.get(order.merchantOrderReference) ?? order)),
+    { header: ORDER_HEADER },
+  );
+  XLSX.utils.book_append_sheet(wb, ordersSheet, "Pedidos");
+
+  const allItems = orders.flatMap((order) => {
+    const detail = details.get(order.merchantOrderReference);
+    return detail ? itemRows(detail) : [];
+  });
+
+  if (allItems.length > 0) {
+    const itemsSheet = XLSX.utils.json_to_sheet(allItems, { header: ITEM_HEADER });
+    XLSX.utils.book_append_sheet(wb, itemsSheet, "Itens");
+  }
+
+  XLSX.writeFile(wb, `${filenamePrefix}_${today()}.xlsx`);
+}
+
+function downloadCsv(header: string[], rows: Record<string, unknown>[], filename: string) {
+  const escape = (value: unknown) => {
+    const text = value === undefined || value === null ? "" : String(value);
+    return /[";\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const lines = [header.join(";"), ...rows.map((row) => header.map((key) => escape(row[key])).join(";"))];
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+export function exportOrdersToCsv(orders: ZfOrderSummary[], details: Map<string, ZfOrder>) {
+  const rows = orders.map((order) => orderToRow(details.get(order.merchantOrderReference) ?? order));
+  downloadCsv(ORDER_HEADER, rows, `ZF_Pedidos_${today()}.csv`);
+}
+
+/** CSV plano de itens — o formato que costuma entrar no ERP. */
+export function exportOrderItemsToCsv(orders: ZfOrderSummary[], details: Map<string, ZfOrder>) {
+  const rows = orders.flatMap((order) => {
+    const detail = details.get(order.merchantOrderReference);
+    return detail ? itemRows(detail) : [];
+  });
+  downloadCsv(ITEM_HEADER, rows, `ZF_Itens_Pedidos_${today()}.csv`);
 }

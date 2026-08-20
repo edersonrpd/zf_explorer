@@ -22,7 +22,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 export const DEFAULT_BASE_URL = "https://api.pro-parts.com/retailer/v1";
 
-export type ZfOperation = "getOffer" | "getOffers";
+export type ZfOperation = "getOffer" | "getOffers" | "getOrder" | "getOrders";
 
 export interface ZfCredentials {
   clientId: string;
@@ -40,12 +40,24 @@ export interface ZfOfferFilters {
   limit?: number;
 }
 
+export interface ZfOrderFilters {
+  /** Data de criação em UTC, "YYYY-MM-DD HH:MM:SS". */
+  createdFrom?: string;
+  createdTo?: string;
+  /** Estados do pedido. Vira uma chave repetida na querystring. */
+  state?: string[];
+  offset?: number;
+  limit?: number;
+}
+
 export interface ZfProxyRequest {
   operation: ZfOperation;
   credentials: ZfCredentials;
   params?: {
     productOfferReference?: string;
+    merchantOrderReference?: string;
     filters?: ZfOfferFilters;
+    orderFilters?: ZfOrderFilters;
     correlationId?: string;
   };
 }
@@ -94,9 +106,49 @@ function buildOffersQuery(filters: ZfOfferFilters = {}): string {
     qs.set("page[limit]", String(Math.max(1, Math.trunc(filters.limit))));
   }
 
-  // URLSearchParams codifica espaço como "+". Part numbers da ZF têm espaços
-  // ("0 280 156 096") e nem todo gateway decodifica "+" como espaço, então
-  // usamos %20, que é aceito em qualquer implementação.
+  return finishQuery(qs);
+}
+
+/**
+ * Querystring de GET /orders.
+ *
+ * `filter[proPartsOrders.state]` é o único filtro multivalorado da API: a
+ * documentação diz que vários estados se especificam "simply repeating this
+ * filter key". Por isso `append` em vez de `set` — um `set` sobrescreveria e
+ * só o último estado seria enviado, filtrando errado sem dar nenhum erro.
+ */
+function buildOrdersQuery(filters: ZfOrderFilters = {}): string {
+  const qs = new URLSearchParams();
+
+  if (filters.createdFrom?.trim()) {
+    qs.set("filter[proPartsOrders.createdFrom]", filters.createdFrom.trim());
+  }
+  if (filters.createdTo?.trim()) {
+    qs.set("filter[proPartsOrders.createdTo]", filters.createdTo.trim());
+  }
+  for (const state of filters.state ?? []) {
+    if (String(state).trim()) {
+      qs.append("filter[proPartsOrders.state]", String(state).trim());
+    }
+  }
+
+  if (typeof filters.offset === "number" && Number.isFinite(filters.offset)) {
+    qs.set("page[offset]", String(Math.max(0, Math.trunc(filters.offset))));
+  }
+  if (typeof filters.limit === "number" && Number.isFinite(filters.limit)) {
+    qs.set("page[limit]", String(Math.max(1, Math.trunc(filters.limit))));
+  }
+
+  return finishQuery(qs);
+}
+
+/**
+ * URLSearchParams codifica espaço como "+". Part numbers têm espaços
+ * ("0 280 156 096") e datas também ("2024-04-01 23:59:59"); nem todo gateway
+ * decodifica "+" como espaço, então usamos %20, aceito em qualquer
+ * implementação.
+ */
+function finishQuery(qs: URLSearchParams): string {
   const query = qs.toString().replace(/\+/g, "%20");
   return query ? `?${query}` : "";
 }
@@ -132,6 +184,14 @@ export async function callZfApi(request: ZfProxyRequest): Promise<ZfProxyResult>
     url = `${baseUrl}/offers/${encodeURIComponent(reference)}`;
   } else if (operation === "getOffers") {
     url = `${baseUrl}/offers${buildOffersQuery(params?.filters)}`;
+  } else if (operation === "getOrder") {
+    const reference = (params?.merchantOrderReference || "").trim();
+    if (!reference) {
+      return { status: 400, body: { error: "merchantOrderReference é obrigatório." } };
+    }
+    url = `${baseUrl}/orders/${encodeURIComponent(reference)}`;
+  } else if (operation === "getOrders") {
+    url = `${baseUrl}/orders${buildOrdersQuery(params?.orderFilters)}`;
   } else {
     return { status: 400, body: { error: `Operação não suportada: ${operation}` } };
   }

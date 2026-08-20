@@ -5,6 +5,7 @@ export const STORAGE_KEYS = {
   credentials: "zf-explorer:credentials",
   lastReferences: "zf-explorer:last-references",
   lastFilters: "zf-explorer:last-filters",
+  orderFilters: "zf-explorer:order-filters",
   syncSettings: "zf-explorer:sync-settings",
 } as const;
 
@@ -44,3 +45,20 @@ export const SYNC_DELAYS = [
 
 /** Quantas linhas a tabela do catálogo mostra por vez. */
 export const CATALOG_VIEW_PAGE_SIZE = 50;
+
+export const DEFAULT_ORDER_FILTERS = {
+  createdFrom: "",
+  createdTo: "",
+  state: [] as string[],
+  offset: 0,
+  limit: 25,
+};
+
+/**
+ * Estados citados na documentação. A API não publica a lista fechada, então
+ * estes são apenas atalhos — a tela também oferece os estados que aparecerem
+ * nos pedidos já carregados e um campo livre para qualquer outro.
+ */
+export const KNOWN_ORDER_STATES = ["new", "canceled", "waiting for documents"];
+
+export const PAYMENT_METHODS = ["Credit Card", "Debit Card", "Pix", "Boleto"];

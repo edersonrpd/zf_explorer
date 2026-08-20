@@ -1,5 +1,4 @@
-import { getOffers, ZfApiError } from "../services/zfService";
-import { OfferFilters, ZfCredentials, ZfOffer } from "../types";
+import { ZfApiError } from "../services/zfService";
 
 export type CrawlStopReason =
   | "completo"           // a API devolveu uma página vazia: acabou o catálogo
@@ -28,21 +27,26 @@ export interface CrawlProgress {
   recovering?: { kind: "reduzindo" | "pulando"; offset: number; pageSize: number };
 }
 
-export interface CrawlOptions {
-  credentials: ZfCredentials;
-  /** Filtros de conteúdo. offset/limit daqui são ignorados. */
-  filters: Partial<OfferFilters>;
+export interface CrawlOptions<T> {
+  /**
+   * Busca uma página. Recebe offset/limit e devolve os registros daquele
+   * trecho. É o único ponto que sabe qual endpoint está sendo varrido — toda a
+   * lógica de paginação e recuperação abaixo vale igual para ofertas e pedidos.
+   */
+  fetchPage: (offset: number, limit: number) => Promise<T[]>;
+  /** Chave de deduplicação do registro (referência única). */
+  keyOf: (item: T) => string | undefined;
   pageSize: number;
   delayMs: number;
   maxPages: number;
   startOffset?: number;
-  onPage: (newOffers: ZfOffer[], progress: CrawlProgress) => void;
+  onPage: (newItems: T[], progress: CrawlProgress) => void;
   isCancelled: () => boolean;
   waitWhilePaused: () => Promise<void>;
 }
 
-export interface CrawlResult {
-  offers: ZfOffer[];
+export interface CrawlResult<T> {
+  items: T[];
   pagesRead: number;
   requestCount: number;
   skipped: SkippedRecord[];
@@ -108,10 +112,10 @@ const MAX_CONSECUTIVE_SKIPS = 10;
  * Assim uma oferta corrompida custa algumas requisições extras em vez de
  * custar todo o resto do catálogo.
  */
-export async function crawlAllOffers(options: CrawlOptions): Promise<CrawlResult> {
-  const { credentials, filters, pageSize, delayMs, maxPages, onPage, isCancelled, waitWhilePaused } = options;
+export async function crawlAll<T>(options: CrawlOptions<T>): Promise<CrawlResult<T>> {
+  const { fetchPage: fetchPageFn, keyOf, pageSize, delayMs, maxPages, onPage, isCancelled, waitWhilePaused } = options;
 
-  const collected: ZfOffer[] = [];
+  const collected: T[] = [];
   const skipped: SkippedRecord[] = [];
   const seen = new Set<string>();
 
@@ -142,8 +146,8 @@ export async function crawlAllOffers(options: CrawlOptions): Promise<CrawlResult
     ...extra,
   });
 
-  const finish = (stopReason: CrawlStopReason, error?: string): CrawlResult => ({
-    offers: collected,
+  const finish = (stopReason: CrawlStopReason, error?: string): CrawlResult<T> => ({
+    items: collected,
     pagesRead,
     requestCount,
     skipped,
@@ -157,11 +161,10 @@ export async function crawlAllOffers(options: CrawlOptions): Promise<CrawlResult
     if (isCancelled()) return finish("cancelado");
     if (requestCount >= maxRequests) return finish("limite-requisicoes");
 
-    let page: ZfOffer[];
+    let page: T[];
     try {
-      page = await fetchPage(
-        credentials,
-        { ...filters, offset, limit: currentPageSize },
+      page = await fetchWithPolicy(
+        () => fetchPageFn(offset, currentPageSize),
         {
           // No tamanho cheio vale absorver um blip. Já degradados, o objetivo é
           // localizar o registro ruim, não esperar a API melhorar — exceto no
@@ -222,8 +225,8 @@ export async function crawlAllOffers(options: CrawlOptions): Promise<CrawlResult
 
     if (page.length === 0) return finish("completo");
 
-    const fresh = page.filter((offer) => {
-      const key = offer?.productOfferReference;
+    const fresh = page.filter((item) => {
+      const key = keyOf(item);
       if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -267,19 +270,17 @@ interface FetchPageOptions {
  * Uma página. 429 sempre respeita o Retry-After da ZF; 5xx só é retentado
  * enquanto `transientRetries` permitir. Erros definitivos sobem na hora.
  */
-async function fetchPage(
-  credentials: ZfCredentials,
-  filters: Partial<OfferFilters> & { offset: number; limit: number },
+async function fetchWithPolicy<T>(
+  run: () => Promise<T[]>,
   { transientRetries, isCancelled, onRequest, onRetry }: FetchPageOptions,
-): Promise<ZfOffer[]> {
+): Promise<T[]> {
   let transientAttempts = 0;
   let rateLimitAttempts = 0;
 
   for (;;) {
     try {
       onRequest();
-      const { offers } = await getOffers(credentials, filters);
-      return offers;
+      return await run();
     } catch (error) {
       const apiError = error instanceof ZfApiError ? error : null;
       if (apiError && !apiError.isRetryable) throw error;

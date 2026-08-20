@@ -14,7 +14,7 @@ export interface SyncSettings {
 }
 
 interface CatalogPanelProps {
-  state: SyncState;
+  state: SyncState<ZfOffer>;
   settings: SyncSettings;
   onSettingsChange: (settings: SyncSettings) => void;
   filters: OfferFilters;
@@ -97,8 +97,8 @@ export function CatalogPanel({
   // Filtra e ordena o conjunto inteiro e só então fatia a página visível —
   // do contrário a ordenação valeria apenas para as linhas já na tela.
   const processed = useMemo(
-    () => sortOffers(filterOffersLocally(state.offers, search), sort),
-    [state.offers, search, sort],
+    () => sortOffers(filterOffersLocally(state.items, search), sort),
+    [state.items, search, sort],
   );
 
   const totalViewPages = Math.max(1, Math.ceil(processed.length / CATALOG_VIEW_PAGE_SIZE));
@@ -109,7 +109,7 @@ export function CatalogPanel({
   );
 
   const offersPerSecond =
-    state.elapsedMs > 0 ? (state.offers.length / (state.elapsedMs / 1000)).toFixed(1) : "0.0";
+    state.elapsedMs > 0 ? (state.items.length / (state.elapsedMs / 1000)).toFixed(1) : "0.0";
 
   return (
     <>
@@ -178,12 +178,12 @@ export function CatalogPanel({
             </>
           )}
 
-          {state.offers.length > 0 && !isBusy && (
+          {state.items.length > 0 && !isBusy && (
             <>
-              <button className="btn btn-dark" onClick={() => onExportCsv(state.offers)}>
-                Baixar CSV ({state.offers.length.toLocaleString("pt-BR")})
+              <button className="btn btn-dark" onClick={() => onExportCsv(state.items)}>
+                Baixar CSV ({state.items.length.toLocaleString("pt-BR")})
               </button>
-              <button className="btn btn-ghost" onClick={() => onExportXlsx(state.offers)}>
+              <button className="btn btn-ghost" onClick={() => onExportXlsx(state.items)}>
                 Baixar XLSX
               </button>
               <button className="btn btn-ghost" onClick={onReset}>Limpar</button>
@@ -204,7 +204,7 @@ export function CatalogPanel({
           <div className="sync-stats">
             <div className="sync-stat">
               <div className="sk">Ofertas carregadas</div>
-              <div className="sv">{state.offers.length.toLocaleString("pt-BR")}</div>
+              <div className="sv">{state.items.length.toLocaleString("pt-BR")}</div>
             </div>
             <div className="sync-stat">
               <div className="sk">Páginas lidas</div>
@@ -288,7 +288,7 @@ export function CatalogPanel({
           {state.status === "error" && (
             <div className="sync-note rose">
               {state.error}
-              {state.offers.length > 0 && " As ofertas já baixadas continuam disponíveis para exportar."}
+              {state.items.length > 0 && " As ofertas já baixadas continuam disponíveis para exportar."}
             </div>
           )}
 
@@ -299,7 +299,7 @@ export function CatalogPanel({
       )}
 
       {/* Tabela do que já foi baixado */}
-      {state.offers.length > 0 && (
+      {state.items.length > 0 && (
         <section className="card" style={{ marginTop: "22px" }}>
           <div className="card-head">
             <span className="ico">
@@ -308,8 +308,8 @@ export function CatalogPanel({
             <h2>Catálogo baixado</h2>
             <span className="count">
               {search
-                ? `${processed.length.toLocaleString("pt-BR")} de ${state.offers.length.toLocaleString("pt-BR")}`
-                : `${state.offers.length.toLocaleString("pt-BR")} ofertas`}
+                ? `${processed.length.toLocaleString("pt-BR")} de ${state.items.length.toLocaleString("pt-BR")}`
+                : `${state.items.length.toLocaleString("pt-BR")} ofertas`}
             </span>
             <div style={{ marginLeft: "auto", minWidth: "240px" }}>
               <input
