@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { CATALOG_VIEW_PAGE_SIZE, SYNC_DELAYS, SYNC_PAGE_SIZES } from "../constants";
 import { SyncState } from "../hooks/useCatalogSync";
 import { DEFAULT_SORT, SortState, filterOffersLocally, sortOffers } from "../lib/sortOffers";
+import { ReactNode } from "react";
 import { OfferFilters, ZfOffer } from "../types";
 import { OfferFiltersFields } from "./OfferFiltersFields";
 import { OffersTable } from "./OffersTable";
@@ -27,6 +28,8 @@ interface CatalogPanelProps {
   onExportCsv: (offers: ZfOffer[]) => void;
   onSelectOffer: (offer: ZfOffer) => void;
   selectedReference?: string;
+  /** Detalhe mostrado logo abaixo da linha clicada. */
+  renderOfferDetail: (offer: ZfOffer) => ReactNode;
 }
 
 const STOP_REASON_LABEL: Record<string, string> = {
@@ -59,6 +62,7 @@ export function CatalogPanel({
   onExportCsv,
   onSelectOffer,
   selectedReference,
+  renderOfferDetail,
 }: CatalogPanelProps) {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
@@ -251,6 +255,7 @@ export function CatalogPanel({
             sort={sort}
             onSortChange={(next) => { setSort(next); setVisiblePage(0); }}
             preSorted
+            renderExpanded={renderOfferDetail}
           />
 
           <div className="pager">

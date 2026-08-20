@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, ReactNode, useMemo, useState } from "react";
 import { DEFAULT_SORT, SortKey, SortState, sortOffers, toggleSort } from "../lib/sortOffers";
 import { formatDate, formatPrice, formatQuantity } from "../lib/utils";
 import { ZfOffer } from "../types";
@@ -17,6 +17,12 @@ interface OffersTableProps {
   onSortChange?: (sort: SortState) => void;
   /** Quando true, as linhas já vêm ordenadas de fora. */
   preSorted?: boolean;
+  /**
+   * Detalhe expandido da oferta selecionada. Renderizado como uma linha extra
+   * logo abaixo da linha clicada — com listas longas, jogar o detalhe no rodapé
+   * da página obriga a rolar para achar o que acabou de ser clicado.
+   */
+  renderExpanded?: (offer: ZfOffer) => ReactNode;
 }
 
 export function OffersTable({
@@ -26,6 +32,7 @@ export function OffersTable({
   sort,
   onSortChange,
   preSorted,
+  renderExpanded,
 }: OffersTableProps) {
   const [internalSort, setInternalSort] = useState<SortState>(DEFAULT_SORT);
   const activeSort = sort ?? internalSort;
@@ -68,33 +75,49 @@ export function OffersTable({
             ))}
             <th>Status</th>
             <th>Vigência</th>
+            {renderExpanded && <th style={{ width: "38px" }}></th>}
           </tr>
         </thead>
         <tbody>
-          {rows.map((offer) => (
-            <tr
-              key={offer.productOfferReference}
-              className={`row ${selectedReference === offer.productOfferReference ? "selected" : ""}`}
-              onClick={() => onSelect(offer)}
-            >
-              <td className="mono" style={{ maxWidth: "300px", wordBreak: "break-all" }}>{offer.productOfferReference}</td>
-              <td className="mono">{offer.merchantSku || "—"}</td>
-              <td>{offer.brand || "—"}</td>
-              <td className="mono">{offer.partNumber || "—"}</td>
-              <td className="num">{formatQuantity(offer.quantity)}</td>
-              <td className="num">{formatPrice(offer.netPrice)}</td>
-              <td>
-                <span className={`badge ${offer.isActive ? "green" : "gray"}`}>
-                  {offer.isActive ? "ATIVA" : "INATIVA"}
-                </span>
-              </td>
-              <td style={{ fontSize: "12px", color: "var(--muted)", whiteSpace: "nowrap" }}>
-                {offer.validFrom || offer.validTo
-                  ? `${formatDate(offer.validFrom)} → ${formatDate(offer.validTo)}`
-                  : "Sem vigência"}
-              </td>
-            </tr>
-          ))}
+          {rows.map((offer) => {
+            const isExpanded = selectedReference === offer.productOfferReference;
+            return (
+              <Fragment key={offer.productOfferReference}>
+                <tr className={`row ${isExpanded ? "selected" : ""}`} onClick={() => onSelect(offer)}>
+                  <td className="mono" style={{ maxWidth: "300px", wordBreak: "break-all" }}>{offer.productOfferReference}</td>
+                  <td className="mono">{offer.merchantSku || "—"}</td>
+                  <td>{offer.brand || "—"}</td>
+                  <td className="mono">{offer.partNumber || "—"}</td>
+                  <td className="num">{formatQuantity(offer.quantity)}</td>
+                  <td className="num">{formatPrice(offer.netPrice)}</td>
+                  <td>
+                    <span className={`badge ${offer.isActive ? "green" : "gray"}`}>
+                      {offer.isActive ? "ATIVA" : "INATIVA"}
+                    </span>
+                  </td>
+                  <td style={{ fontSize: "12px", color: "var(--muted)", whiteSpace: "nowrap" }}>
+                    {offer.validFrom || offer.validTo
+                      ? `${formatDate(offer.validFrom)} → ${formatDate(offer.validTo)}`
+                      : "Sem vigência"}
+                  </td>
+                  {renderExpanded && (
+                    <td className="chev-cell">
+                      <span className={`chev ${isExpanded ? "open" : ""}`} aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                      </span>
+                    </td>
+                  )}
+                </tr>
+                {renderExpanded && isExpanded && (
+                  <tr className="detail-row">
+                    <td className="detail-cell" colSpan={columns.length + 3}>
+                      <div className="detail-inner">{renderExpanded(offer)}</div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import { CatalogPanel, SyncSettings } from "./components/CatalogPanel";
 import { JsonDrawer } from "./components/JsonDrawer";
 import { OfferDetail } from "./components/OfferDetail";
@@ -128,8 +128,10 @@ export default function App() {
     setLookupProgress(null);
     setLookupLoading(false);
 
-    const firstSuccess = finished.find((item) => item.status === "success");
-    if (firstSuccess) setSelectedReference(firstSuccess.reference);
+    const toSelect =
+      finished.find((item) => item.status === "success") ??
+      (finished.length === 1 ? finished[0] : undefined);
+    if (toSelect) setSelectedReference(toSelect.reference);
 
     const failures = finished.filter((item) => item.status !== "success").length;
     displayToast(
@@ -191,6 +193,18 @@ export default function App() {
 
   const updateFilter = <K extends keyof OfferFilters>(key: K, value: OfferFilters[K]) =>
     setFilters({ ...filters, [key]: value });
+
+  /** Só linhas com algo a mostrar (oferta ou erro) abrem; clicar de novo fecha. */
+  const toggleSelectedReference = (result: OfferLookupResult) => {
+    if (result.status !== "success" && !result.errorMsg) return;
+    setSelectedReference((current) => (current === result.reference ? null : result.reference));
+  };
+
+  /** Clicar de novo na linha já aberta fecha o detalhe. */
+  const toggleSelectedOffer = (offer: ZfOffer) =>
+    setSelectedOffer((current) =>
+      current?.productOfferReference === offer.productOfferReference ? null : offer,
+    );
 
   const startCatalogSync = () => {
     if (!hasCredentials) {
@@ -374,36 +388,75 @@ export default function App() {
                         <th className="num">Qtd.</th>
                         <th className="num">Net Price</th>
                         <th>Resultado</th>
+                        <th style={{ width: "38px" }}></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {lookupResults.map((result) => (
-                        <tr
-                          key={result.reference}
-                          className={`row ${selectedReference === result.reference ? "selected" : ""}`}
-                          onClick={() => result.status === "success" && setSelectedReference(result.reference)}
-                        >
-                          <td className="mono" style={{ maxWidth: "320px", wordBreak: "break-all" }}>{result.reference}</td>
-                          <td>{result.data?.brand || "—"}</td>
-                          <td className="mono">{result.data?.partNumber || "—"}</td>
-                          <td className="num">{result.data?.quantity ?? "—"}</td>
-                          <td className="num">{result.data?.netPrice ?? "—"}</td>
-                          <td>
-                            {result.status === "success" && <span className="badge green">ENCONTRADA</span>}
-                            {result.status === "not_found" && <span className="badge amber">NÃO ENCONTRADA</span>}
-                            {result.status === "error" && <span className="badge rose">ERRO</span>}
-                            {result.status === "loading" && <span className="badge blue">CONSULTANDO</span>}
-                            {result.status === "pending" && <span className="badge gray">NA FILA</span>}
-                          </td>
-                        </tr>
-                      ))}
+                      {lookupResults.map((result) => {
+                        const isOpen = selectedReference === result.reference;
+                        return (
+                          <Fragment key={result.reference}>
+                            <tr
+                              className={`row ${isOpen ? "selected" : ""}`}
+                              onClick={() => toggleSelectedReference(result)}
+                            >
+                              <td className="mono" style={{ maxWidth: "320px", wordBreak: "break-all" }}>{result.reference}</td>
+                              <td>{result.data?.brand || "—"}</td>
+                              <td className="mono">{result.data?.partNumber || "—"}</td>
+                              <td className="num">{result.data?.quantity ?? "—"}</td>
+                              <td className="num">{result.data?.netPrice ?? "—"}</td>
+                              <td>
+                                {result.status === "success" && <span className="badge green">ENCONTRADA</span>}
+                                {result.status === "not_found" && <span className="badge amber">NÃO ENCONTRADA</span>}
+                                {result.status === "error" && <span className="badge rose">ERRO</span>}
+                                {result.status === "loading" && <span className="badge blue">CONSULTANDO</span>}
+                                {result.status === "pending" && <span className="badge gray">NA FILA</span>}
+                              </td>
+                              <td className="chev-cell">
+                                {(result.status === "success" || result.errorMsg) && (
+                                  <span className={`chev ${isOpen ? "open" : ""}`} aria-hidden="true">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                            {isOpen && (
+                              <tr className="detail-row">
+                                <td className="detail-cell" colSpan={7}>
+                                  <div className="detail-inner">
+                                    {result.status === "success" && result.data ? (
+                                      <OfferDetail
+                                        offer={result.data}
+                                        correlationId={result.correlationId}
+                                        onCopy={copyToClipboard}
+                                        onOpenJson={() =>
+                                          setJsonDrawer({
+                                            data: result.data,
+                                            title: "GET /offers/:productOfferReference",
+                                            subtitle: result.correlationId ? `x-correlation-id ${result.correlationId}` : undefined,
+                                          })
+                                        }
+                                      />
+                                    ) : (
+                                      <div className="alert error" style={{ marginTop: 0 }}>
+                                        <strong>{result.reference}</strong>
+                                        {result.errorMsg}
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               </section>
             )}
 
-            {selectedLookup?.status === "success" && selectedLookup.data && (
+            {lookupResults.length === 1 && selectedLookup?.status === "success" && selectedLookup.data && (
               <>
                 <div className="results-head">
                   <h1>
@@ -448,7 +501,7 @@ export default function App() {
               </>
             )}
 
-            {selectedLookup && selectedLookup.status !== "success" && (
+            {lookupResults.length === 1 && selectedLookup && selectedLookup.status !== "success" && (
               <div className="alert error" style={{ marginTop: "22px" }}>
                 <strong>{selectedLookup.reference}</strong>
                 {selectedLookup.errorMsg}
@@ -573,7 +626,21 @@ export default function App() {
                   <OffersTable
                     offers={offers}
                     selectedReference={selectedOffer?.productOfferReference}
-                    onSelect={setSelectedOffer}
+                    onSelect={toggleSelectedOffer}
+                    renderExpanded={(offer) => (
+                      <OfferDetail
+                        offer={offer}
+                        correlationId={offersCorrelationId}
+                        onCopy={copyToClipboard}
+                        onOpenJson={() =>
+                          setJsonDrawer({
+                            data: offer,
+                            title: "Oferta (item da lista)",
+                            subtitle: offer.productOfferReference,
+                          })
+                        }
+                      />
+                    )}
                   />
                 )}
 
@@ -600,33 +667,6 @@ export default function App() {
                   </button>
                 </div>
               </section>
-            )}
-
-            {selectedOffer && (
-              <>
-                <div className="results-head">
-                  <h1>
-                    Oferta <span>{selectedOffer.productOfferReference}</span>
-                  </h1>
-                  <div className="results-actions">
-                    <button className="btn btn-ghost" onClick={() => setSelectedOffer(null)}>
-                      Fechar detalhe
-                    </button>
-                  </div>
-                </div>
-                <OfferDetail
-                  offer={selectedOffer}
-                  correlationId={offersCorrelationId}
-                  onCopy={copyToClipboard}
-                  onOpenJson={() =>
-                    setJsonDrawer({
-                      data: selectedOffer,
-                      title: "Oferta (item da lista)",
-                      subtitle: selectedOffer.productOfferReference,
-                    })
-                  }
-                />
-              </>
             )}
 
             {!offersLoaded && !offersLoading && (
@@ -660,6 +700,19 @@ export default function App() {
               onResume={sync.resume}
               onCancel={sync.cancel}
               onReset={sync.reset}
+              renderOfferDetail={(offer) => (
+                <OfferDetail
+                  offer={offer}
+                  onCopy={copyToClipboard}
+                  onOpenJson={() =>
+                    setJsonDrawer({
+                      data: offer,
+                      title: "Oferta (item do catálogo)",
+                      subtitle: offer.productOfferReference,
+                    })
+                  }
+                />
+              )}
               onExportXlsx={(offers) => {
                 displayToast(`Gerando XLSX com ${offers.length.toLocaleString("pt-BR")} ofertas...`);
                 void exportOffersToExcel(offers, "ZF_Catalogo");
@@ -668,35 +721,10 @@ export default function App() {
                 displayToast(`Gerando CSV com ${offers.length.toLocaleString("pt-BR")} ofertas...`);
                 exportOffersToCsv(offers, "ZF_Catalogo");
               }}
-              onSelectOffer={setSelectedOffer}
+              onSelectOffer={toggleSelectedOffer}
               selectedReference={selectedOffer?.productOfferReference}
             />
 
-            {selectedOffer && (
-              <>
-                <div className="results-head">
-                  <h1>
-                    Oferta <span>{selectedOffer.productOfferReference}</span>
-                  </h1>
-                  <div className="results-actions">
-                    <button className="btn btn-ghost" onClick={() => setSelectedOffer(null)}>
-                      Fechar detalhe
-                    </button>
-                  </div>
-                </div>
-                <OfferDetail
-                  offer={selectedOffer}
-                  onCopy={copyToClipboard}
-                  onOpenJson={() =>
-                    setJsonDrawer({
-                      data: selectedOffer,
-                      title: "Oferta (item do catálogo)",
-                      subtitle: selectedOffer.productOfferReference,
-                    })
-                  }
-                />
-              </>
-            )}
           </>
         )}
       </div>

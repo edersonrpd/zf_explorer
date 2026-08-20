@@ -276,6 +276,41 @@
   .sortable{cursor:pointer;user-select:none}
   .sortable:hover{color:var(--ink-2)}
 
+  /* ---------- Linha de detalhe expandida ---------- */
+  .chev-cell{text-align:center;color:var(--muted-2);width:38px}
+  .chev{display:inline-flex;transition:transform .18s}
+  .chev svg{width:15px;height:15px}
+  .chev.open{transform:rotate(180deg);color:var(--accent-strong)}
+
+  .data tr.detail-row:hover{background:none}
+  .data tr.detail-row td{
+    padding:0;background:var(--surface-2);
+    border-bottom:1px solid var(--border-strong);
+    border-left:3px solid var(--accent);
+  }
+  /*
+   * A tabela rola na horizontal em telas estreitas. Sem o sticky, o detalhe
+   * ficaria ancorado na largura total da tabela e sumiria da tela junto com as
+   * colunas — o usuário teria de rolar de volta para lê-lo.
+   */
+  .detail-inner{
+    position:sticky;left:0;
+    width:min(100%,calc(100vw - 88px));
+    padding:20px;
+    animation:detail-in .18s ease-out;
+  }
+  @keyframes detail-in{
+    from{opacity:0;transform:translateY(-6px)}
+    to{opacity:1;transform:none}
+  }
+  /* Dentro da linha o detalhe é um bloco embutido: sem sombra dupla. */
+  .detail-inner .card{box-shadow:none}
+  .detail-inner .grid-layout{gap:18px}
+
+  @media(max-width:1180px){
+    .detail-inner .grid-layout{grid-template-columns:1fr}
+  }
+
   /* ---------- Paginação ---------- */
   .pager{
     display:flex;align-items:center;gap:12px;padding:14px 18px;
