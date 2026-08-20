@@ -155,6 +155,39 @@ cobertos em `src/lib/crawlOffers.ts`:
 
 Há ainda um teto de páginas configurável (padrão 500) como rede de segurança.
 
+### Registros que a ZF não consegue entregar
+
+O catálogo contém ofertas que o servidor da ZF não consegue serializar. Elas
+respondem **HTTP 500 permanente**, sempre com a mesma mensagem:
+
+```
+Property "brand" of transfer `...MerchantProductOfferPayloadTransfer` is null.
+```
+
+Não adianta esperar — o registro está quebrado no banco deles. E abortar ali
+perderia todo o catálogo depois do registro ruim. A varredura então **degrada e
+segue**, em espírito de slow-start:
+
+1. Página falhou de forma persistente → **corta o tamanho da página pela metade**
+   e tenta de novo no mesmo offset. Repete até chegar a 1.
+2. Falhou pedindo **um único registro**, duas vezes → é ele o corrompido. Fica
+   registrado e é **pulado**, e a varredura continua.
+3. A cada sucesso o tamanho **dobra de volta** até o valor original, então o
+   crawler anda devagar só na vizinhança do registro ruim.
+
+Custo medido: **~27 requisições e ~3 segundos por registro corrompido**,
+independente do tamanho do catálogo. Um registro quebrado custa isso em vez de
+custar todo o resto do download.
+
+No fim, a interface lista as posições que falharam, o motivo real extraído do
+corpo da resposta e o `x-correlation-id` de cada uma — com um botão para copiar
+tudo e mandar ao suporte da ZF, que é quem pode corrigir o cadastro.
+
+**Salvaguarda contra falso "completo".** Se 10 registros seguidos falharem, isso
+não é corrupção pontual — é a API fora do ar. Nesse caso a varredura **aborta com
+erro** em vez de continuar pulando, porque uma exportação incompleta apresentada
+como completa é o pior resultado possível: silenciosamente errada.
+
 ## Notas sobre a API
 
 - `quantity` e `netPrice` chegam como **string** (`"50"`, `"1000.00"`) — a

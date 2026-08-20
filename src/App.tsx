@@ -721,6 +721,7 @@ export default function App() {
                 displayToast(`Gerando CSV com ${offers.length.toLocaleString("pt-BR")} ofertas...`);
                 exportOffersToCsv(offers, "ZF_Catalogo");
               }}
+              onCopy={copyToClipboard}
               onSelectOffer={toggleSelectedOffer}
               selectedReference={selectedOffer?.productOfferReference}
             />

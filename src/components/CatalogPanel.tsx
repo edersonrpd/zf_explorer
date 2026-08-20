@@ -26,6 +26,7 @@ interface CatalogPanelProps {
   onReset: () => void;
   onExportXlsx: (offers: ZfOffer[]) => void;
   onExportCsv: (offers: ZfOffer[]) => void;
+  onCopy: (value: string, label: string) => void;
   onSelectOffer: (offer: ZfOffer) => void;
   selectedReference?: string;
   /** Detalhe mostrado logo abaixo da linha clicada. */
@@ -36,9 +37,31 @@ const STOP_REASON_LABEL: Record<string, string> = {
   completo: "Catálogo percorrido até o fim.",
   cancelado: "Interrompido por você — o que já veio continua disponível para exportar.",
   "limite-paginas": "Parou no teto de páginas configurado. Aumente o limite se o catálogo for maior.",
+  "limite-requisicoes": "Gastou requisições demais se recuperando de erros. Aumente o teto de páginas para continuar, ou revise os registros com falha.",
   "sem-novidade": "A API repetiu ofertas já recebidas, então a varredura parou para não entrar em laço. Pode ser que o catálogo tenha acabado ou que o offset esteja sendo ignorado.",
   erro: "A varredura parou por causa de um erro.",
 };
+
+/**
+ * A mensagem de erro carrega o corpo JSON da ZF inteiro. Para a lista de falhas
+ * interessa só o motivo real — "Property \"brand\" ... is null" diz exatamente
+ * qual campo do registro está quebrado no banco deles, que é o que o suporte
+ * precisa. O texto genérico ("tente novamente em instantes") é enganoso aqui:
+ * este erro é permanente, nunca vai passar sozinho.
+ */
+function extractZfDetail(message: string): string {
+  const start = message.indexOf("{");
+  if (start === -1) return message;
+  try {
+    const body = JSON.parse(message.slice(start));
+    const detail = body?.details?.[0]?.message;
+    if (typeof detail === "string" && detail) return detail;
+    if (typeof body?.reason === "string" && body.reason) return body.reason;
+  } catch {
+    // Corpo não-JSON: mostra o texto como veio.
+  }
+  return message.slice(0, start).replace(/[\s—-]+$/, "").trim() || message;
+}
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -60,6 +83,7 @@ export function CatalogPanel({
   onReset,
   onExportXlsx,
   onExportCsv,
+  onCopy,
   onSelectOffer,
   selectedReference,
   renderOfferDetail,
@@ -194,6 +218,12 @@ export function CatalogPanel({
               <div className="sk">Ritmo</div>
               <div className="sv">{offersPerSecond}<small> ofertas/s</small></div>
             </div>
+            {state.skipped.length > 0 && (
+              <div className="sync-stat">
+                <div className="sk">Com falha na ZF</div>
+                <div className="sv" style={{ color: "var(--rose)" }}>{state.skipped.length}</div>
+              </div>
+            )}
             <div className="sync-stat sync-state">
               {state.status === "running" && <span className="badge blue">BAIXANDO</span>}
               {state.status === "paused" && <span className="badge amber">PAUSADO</span>}
@@ -209,6 +239,49 @@ export function CatalogPanel({
             <div className="sync-note amber">
               {state.retrying.reason} — aguardando {Math.round(state.retrying.waitMs / 1000)}s antes da
               tentativa {state.retrying.attempt + 1}.
+            </div>
+          )}
+
+          {state.recovering && (
+            <div className="sync-note amber">
+              {state.recovering.kind === "reduzindo"
+                ? `A ZF falhou nesta página. Reduzindo para ${state.recovering.pageSize} ofertas por chamada para isolar o registro com problema…`
+                : `O registro na posição ${state.recovering.offset} não pode ser lido pela ZF. Pulando e seguindo em frente…`}
+            </div>
+          )}
+
+          {state.skipped.length > 0 && (
+            <div className="sync-note rose">
+              <strong>
+                {state.skipped.length} registro(s) que a ZF não consegue entregar (HTTP 500 no servidor
+                deles). O resto do catálogo foi baixado normalmente.
+              </strong>
+              <div className="skipped-list">
+                {state.skipped.slice(0, 5).map((item) => (
+                  <div key={item.offset} className="skipped-item">
+                    <span className="so">posição {item.offset}</span>
+                    <span className="se">{extractZfDetail(item.error).slice(0, 180)}</span>
+                    {item.correlationId && <span className="sc">{item.correlationId}</span>}
+                  </div>
+                ))}
+                {state.skipped.length > 5 && (
+                  <div className="skipped-item"><span className="se">…e mais {state.skipped.length - 5}.</span></div>
+                )}
+              </div>
+              <button
+                className="btn btn-ghost"
+                style={{ marginTop: "10px", padding: "6px 12px", fontSize: "12px" }}
+                onClick={() =>
+                  onCopy(
+                    state.skipped
+                      .map((item) => `offset ${item.offset} | correlationId ${item.correlationId ?? "-"} | ${item.error}`)
+                      .join("\n"),
+                    "Falhas copiadas — envie ao suporte da ZF",
+                  )
+                }
+              >
+                Copiar falhas para o suporte da ZF
+              </button>
             </div>
           )}
 

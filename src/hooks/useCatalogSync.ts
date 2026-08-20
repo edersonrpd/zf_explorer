@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { CrawlProgress, CrawlStopReason, crawlAllOffers } from "../lib/crawlOffers";
+import { CrawlProgress, CrawlStopReason, SkippedRecord, crawlAllOffers } from "../lib/crawlOffers";
 import { OfferFilters, ZfCredentials, ZfOffer } from "../types";
 
 export type SyncStatus = "idle" | "running" | "paused" | "done" | "error";
@@ -8,17 +8,26 @@ export interface SyncState {
   status: SyncStatus;
   offers: ZfOffer[];
   pagesRead: number;
+  requestCount: number;
+  /** Cai abaixo do configurado quando o crawler está isolando um registro ruim. */
+  currentPageSize: number;
+  /** Trechos que a ZF não conseguiu entregar (registro corrompido no servidor). */
+  skipped: SkippedRecord[];
   startedAt: number | null;
   elapsedMs: number;
   stopReason?: CrawlStopReason;
   error?: string;
   retrying?: CrawlProgress["retrying"];
+  recovering?: CrawlProgress["recovering"];
 }
 
 const INITIAL: SyncState = {
   status: "idle",
   offers: [],
   pagesRead: 0,
+  requestCount: 0,
+  currentPageSize: 0,
+  skipped: [],
   startedAt: null,
   elapsedMs: 0,
 };
@@ -61,7 +70,7 @@ export function useCatalogSync() {
       bufferRef.current = [];
 
       const startedAt = Date.now();
-      setState({ ...INITIAL, status: "running", startedAt });
+      setState({ ...INITIAL, status: "running", startedAt, currentPageSize: pageSize });
 
       const result = await crawlAllOffers({
         credentials,
@@ -78,8 +87,12 @@ export function useCatalogSync() {
             status: pauseRef.current ? "paused" : "running",
             offers: bufferRef.current,
             pagesRead: progress.pagesRead,
+            requestCount: progress.requestCount,
+            currentPageSize: progress.currentPageSize,
+            skipped: progress.skipped.slice(),
             elapsedMs: Date.now() - startedAt,
             retrying: progress.retrying,
+            recovering: progress.recovering,
           }));
         },
       });
@@ -90,10 +103,13 @@ export function useCatalogSync() {
         status: result.stopReason === "erro" ? "error" : "done",
         offers: result.offers,
         pagesRead: result.pagesRead,
+        requestCount: result.requestCount,
+        skipped: result.skipped,
         elapsedMs: Date.now() - startedAt,
         stopReason: result.stopReason,
         error: result.error,
         retrying: undefined,
+        recovering: undefined,
       }));
     },
     [waitWhilePaused],
