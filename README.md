@@ -11,7 +11,7 @@ Aplicação **Vite + React + TypeScript** para consultar as ofertas da API
 | Aba | Endpoint | Recursos |
 | --- | --- | --- |
 | **Oferta Única** | `GET /offers/:productOfferReference` | consulta uma ou **várias** referências de uma vez (cola da planilha, separadas por vírgula ou quebra de linha), tabela-resumo com status por referência, detalhe completo da oferta, export XLSX |
-| **Pedidos** | `GET /orders` + `GET /orders/:merchantOrderReference` | filtro por período e estado, paginação ou download do período inteiro, detalhe com itens/entregas/cliente aberto na própria linha, export XLSX (abas Pedidos + Itens) e CSV |
+| **Pedidos** | `GET /orders` + `GET /orders/:merchantOrderReference` | busca por pedido específico (referência), filtro por período e estado, paginação ou download do período inteiro, detalhe com itens/entregas/cliente aberto na própria linha, export XLSX (abas Pedidos + Itens) e CSV |
 | **Buscar Ofertas** | `GET /offers` | filtros por `productOfferReference`, `merchantSku`, `brand`, `partNumber` e `isActive`, paginação `page[offset]` / `page[limit]`, ordenação por coluna, export XLSX |
 | **Catálogo Completo** | `GET /offers` (varredura) | baixa **todas** as ofertas da conta página a página, com pausa configurável entre chamadas, pausar/retomar/parar, progresso ao vivo e export CSV/XLSX — inclusive do parcial |
 
@@ -208,6 +208,23 @@ como completa é o pior resultado possível: silenciosamente errada.
 
 
 ## Pedidos
+
+### Buscar um pedido específico
+
+`GET /orders` **não aceita filtro por `merchantOrderReference`** — só período e
+estado. Procurar um pedido conhecido pela listagem obrigaria a varrer todas as
+páginas do período até topar com ele.
+
+O campo "Pedido específico" resolve isso indo direto em
+`GET /orders/:merchantOrderReference`: uma chamada, e o pedido já vem completo,
+com os itens. O resultado entra na mesma tabela, com a linha aberta, e o detalhe
+é gravado no cache (`useOrderDetails.prime`) para que abrir a linha não repita a
+mesma chamada.
+
+Com a referência preenchida, os filtros de período, estado e paginação ficam
+desligados na tela — não é que sejam ignorados em silêncio: são outra rota da
+API e não se combinam com esta. Um `404` aqui é resposta normal ("esse pedido
+não existe"), então vira uma mensagem específica em vez do erro genérico da API.
 
 ### A listagem não traz os itens
 
