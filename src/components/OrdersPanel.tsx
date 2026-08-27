@@ -50,6 +50,13 @@ export function OrdersPanel(props: OrdersPanelProps) {
   const downloading = sync.status === "running" || sync.status === "paused";
   const busy = loading || downloading || bulk !== null;
 
+  // Buscar um pedido pela referência é outra rota da API (GET /orders/:ref) e
+  // ela não combina com período/estado: enquanto houver referência, os demais
+  // filtros ficam desligados para não passar a impressão de que estão valendo.
+  const reference = (filters.reference ?? "").trim();
+  const byReference = reference.length > 0;
+  const filtersDisabled = busy || byReference;
+
   // Chips de estado: os documentados mais os que aparecerem nos pedidos
   // carregados, já que a API não publica a lista fechada de estados.
   const seenStates = Array.from(new Set(orders.flatMap((order) => order.itemStates ?? [])));
@@ -67,6 +74,40 @@ export function OrdersPanel(props: OrdersPanelProps) {
   return (
     <>
       <section className="conn" style={{ marginTop: "16px" }}>
+        <div style={{ padding: "18px 18px 0" }}>
+          <div className="field">
+            <label htmlFor="ordRef">Pedido específico (merchantOrderReference)</label>
+            <input
+              id="ordRef"
+              className="input mono"
+              type="search"
+              placeholder="Cole aqui a referência do pedido e aperte Enter"
+              value={filters.reference ?? ""}
+              disabled={busy}
+              onChange={(e) => onFilterChange("reference", e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !busy) onSearch();
+              }}
+            />
+          </div>
+          <p style={{ fontSize: "11.5px", color: "var(--muted)", marginTop: "8px" }}>
+            {byReference ? (
+              <>
+                A busca vai direto em <code>GET /orders/:merchantOrderReference</code>, que já devolve
+                os itens do pedido — período e estados ficam de fora.{" "}
+                <button type="button" className="link-btn" disabled={busy} onClick={() => onFilterChange("reference", "")}>
+                  voltar a filtrar por período
+                </button>
+              </>
+            ) : (
+              <>
+                Deixe em branco para listar por período. Com a referência preenchida, a consulta
+                busca esse pedido direto, sem varrer as páginas do período.
+              </>
+            )}
+          </p>
+        </div>
+
         <div className="filters-grid">
           <div className="field">
             <label htmlFor="ordFrom">Criado de</label>
@@ -75,7 +116,7 @@ export function OrdersPanel(props: OrdersPanelProps) {
               className="input"
               type="date"
               value={filters.createdFrom}
-              disabled={busy}
+              disabled={filtersDisabled}
               onChange={(e) => onFilterChange("createdFrom", e.target.value)}
             />
           </div>
@@ -86,7 +127,7 @@ export function OrdersPanel(props: OrdersPanelProps) {
               className="input"
               type="date"
               value={filters.createdTo}
-              disabled={busy}
+              disabled={filtersDisabled}
               onChange={(e) => onFilterChange("createdTo", e.target.value)}
             />
           </div>
@@ -96,7 +137,7 @@ export function OrdersPanel(props: OrdersPanelProps) {
               id="ordLimit"
               className="input"
               value={filters.limit}
-              disabled={busy}
+              disabled={filtersDisabled}
               onChange={(e) => onFilterChange("limit", Number(e.target.value))}
             >
               {PAGE_SIZES.map((size) => (
@@ -112,7 +153,7 @@ export function OrdersPanel(props: OrdersPanelProps) {
               type="number"
               min={0}
               value={filters.offset}
-              disabled={busy}
+              disabled={filtersDisabled}
               onChange={(e) => onFilterChange("offset", Math.max(0, Number(e.target.value) || 0))}
             />
           </div>
@@ -126,14 +167,14 @@ export function OrdersPanel(props: OrdersPanelProps) {
                 key={state}
                 type="button"
                 className={`spill ${filters.state.includes(state) ? "on" : ""}`}
-                disabled={busy}
+                disabled={filtersDisabled}
                 onClick={() => toggleState(state)}
               >
                 {state}
               </button>
             ))}
             {filters.state.length > 0 && (
-              <button type="button" className="link-btn" disabled={busy} onClick={() => onFilterChange("state", [])}>
+              <button type="button" className="link-btn" disabled={filtersDisabled} onClick={() => onFilterChange("state", [])}>
                 limpar estados
               </button>
             )}
@@ -147,20 +188,27 @@ export function OrdersPanel(props: OrdersPanelProps) {
         <div className="filters-foot">
           <button className="btn btn-primary" disabled={busy} onClick={onSearch}>
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-            {loading ? "Buscando..." : "Buscar pedidos"}
+            {loading ? "Buscando..." : byReference ? "Buscar pedido" : "Buscar pedidos"}
           </button>
           {downloading ? (
             <button className="btn btn-ghost" onClick={onCancelDownload}>Parar download</button>
           ) : (
-            <button className="btn btn-dark" disabled={busy} onClick={onDownloadAll}>
+            <button
+              className="btn btn-dark"
+              disabled={filtersDisabled}
+              title={byReference ? "Limpe o campo de pedido específico para baixar o período inteiro." : undefined}
+              onClick={onDownloadAll}
+            >
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
               Baixar todos do período
             </button>
           )}
           <button className="btn btn-ghost" disabled={busy} onClick={onClear}>Limpar</button>
-          <span style={{ fontSize: "12px", color: "var(--muted)" }}>
-            As datas são convertidas do seu fuso para UTC, que é o que a API espera.
-          </span>
+          {!byReference && (
+            <span style={{ fontSize: "12px", color: "var(--muted)" }}>
+              As datas são convertidas do seu fuso para UTC, que é o que a API espera.
+            </span>
+          )}
         </div>
       </section>
 
@@ -266,8 +314,12 @@ export function OrdersPanel(props: OrdersPanelProps) {
               <div className="ico">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
               </div>
-              <h3>Nenhum pedido neste período</h3>
-              <p>Ajuste as datas ou os estados. Se o offset for maior que o total de pedidos, a API devolve uma lista vazia.</p>
+              <h3>{byReference ? "Pedido não encontrado" : "Nenhum pedido neste período"}</h3>
+              <p>
+                {byReference
+                  ? "Confira a referência: ela precisa ser o merchantOrderReference exato, sem espaços ou caracteres a mais."
+                  : "Ajuste as datas ou os estados. Se o offset for maior que o total de pedidos, a API devolve uma lista vazia."}
+              </p>
             </div>
           ) : (
             <OrdersTable
@@ -279,7 +331,7 @@ export function OrdersPanel(props: OrdersPanelProps) {
           )}
 
           {/* A paginação manual não faz sentido depois de baixar tudo. */}
-          {sync.status === "idle" && (
+          {sync.status === "idle" && !byReference && (
             <div className="pager">
               <span className="info">offset {filters.offset} · limit {filters.limit}</span>
               <span className="grow"></span>
@@ -302,9 +354,10 @@ export function OrdersPanel(props: OrdersPanelProps) {
             </div>
             <h3>Consulte os pedidos</h3>
             <p>
-              Filtre por período e estado para listar via <code>GET /orders</code>. Clique em um pedido
-              para abrir os itens logo abaixo — a listagem não traz itens, então eles vêm de uma
-              chamada a <code>GET /orders/:merchantOrderReference</code>.
+              Informe a referência de um pedido para buscá-lo direto em{" "}
+              <code>GET /orders/:merchantOrderReference</code>, ou filtre por período e estado para
+              listar via <code>GET /orders</code>. Clique em um pedido para abrir os itens logo
+              abaixo — a listagem não traz itens, então eles vêm da chamada de detalhe.
             </p>
           </div>
         </div>

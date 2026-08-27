@@ -47,6 +47,7 @@ export const SYNC_DELAYS = [
 export const CATALOG_VIEW_PAGE_SIZE = 50;
 
 export const DEFAULT_ORDER_FILTERS = {
+  reference: "",
   createdFrom: "",
   createdTo: "",
   state: [] as string[],

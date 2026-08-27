@@ -12,7 +12,7 @@ import { OrdersPanel } from "./components/OrdersPanel";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { exportLookupResultsToExcel, exportOffersToCsv, exportOffersToExcel, exportOrderItemsToCsv, exportOrdersToCsv, exportOrdersToExcel } from "./lib/export";
 import { localDateToUtcParam, maskSecret, splitReferences } from "./lib/utils";
-import { getOffer, getOffers, getOrders } from "./services/zfService";
+import { getOffer, getOffers, getOrder, getOrders, ZfApiError } from "./services/zfService";
 import { OfferFilters, OfferLookupResult, OrderFilters, ZfCredentials, ZfOffer, ZfOrderSummary } from "./types";
 
 const TABS = ["Oferta Única", "Buscar Ofertas", "Catálogo Completo", "Pedidos"] as const;
@@ -261,8 +261,51 @@ export default function App() {
     return false;
   };
 
+  /**
+   * Busca um pedido pela referência exata.
+   *
+   * GET /orders não tem filtro por merchantOrderReference — procurar um pedido
+   * conhecido pelo período obrigaria a varrer todas as páginas até achá-lo. O
+   * caminho certo é GET /orders/:merchantOrderReference, que devolve o pedido
+   * inteiro (com itens) em uma chamada. O resultado entra na mesma tabela, já
+   * expandido e com o detalhe no cache.
+   */
+  const runOrderLookup = async (reference: string) => {
+    setOrdersError(null);
+    setOrdersLoading(true);
+    setSelectedOrderRef(null);
+    orderSync.reset();
+    try {
+      const { order, correlationId } = await getOrder(credentials, reference);
+      setOrders([order]);
+      setOrdersLoaded(true);
+      orderDetails.prime(reference, order, correlationId);
+      setSelectedOrderRef(reference);
+      displayToast(`Pedido ${reference} encontrado.`);
+    } catch (error) {
+      setOrders([]);
+      setOrdersLoaded(true);
+      const apiError = error as ZfApiError;
+      // 404 aqui é resposta normal ("não existe"), não falha da consulta.
+      setOrdersError(
+        apiError?.status === 404
+          ? `Nenhum pedido com a referência "${reference}". Confira se ela está completa e sem espaços.`
+          : (error as Error).message,
+      );
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
   const runOrderSearch = async (next: OrderFilters) => {
     if (!requireCredentials("Informe o CLIENT_ID e o CLIENT_SECRET antes de consultar pedidos.")) return;
+
+    // Referência preenchida manda: os demais filtros nem chegam a ser usados.
+    const reference = (next.reference ?? "").trim();
+    if (reference) {
+      await runOrderLookup(reference);
+      return;
+    }
 
     setOrdersError(null);
     setOrdersLoading(true);
@@ -297,6 +340,10 @@ export default function App() {
   /** Varre todas as páginas do período, reaproveitando o crawler das ofertas. */
   const handleDownloadAllOrders = () => {
     if (!requireCredentials("Informe o CLIENT_ID e o CLIENT_SECRET antes de baixar pedidos.")) return;
+    if ((orderFilters.reference ?? "").trim()) {
+      displayToast("Limpe o campo de pedido específico para baixar o período inteiro.");
+      return;
+    }
 
     setOrdersError(null);
     setSelectedOrderRef(null);

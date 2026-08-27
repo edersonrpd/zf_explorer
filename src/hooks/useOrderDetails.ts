@@ -71,6 +71,20 @@ export function useOrderDetails(credentials: ZfCredentials) {
   );
 
   /**
+   * Guarda no cache um detalhe que já veio pronto de outro lugar — o caso da
+   * busca por um pedido específico, que chama GET /orders/:ref direto e já
+   * recebe os itens. Sem isso, abrir a linha do resultado dispararia a mesma
+   * chamada de novo.
+   */
+  const prime = useCallback(
+    (reference: string, order: ZfOrder, correlationId?: string) => {
+      if (!reference) return;
+      update(reference, { order, correlationId, loading: false });
+    },
+    [update],
+  );
+
+  /**
    * Carrega o detalhe de vários pedidos em sequência, com pausa entre eles.
    * Serializado de propósito: um lote em paralelo derruba o rate limit da ZF,
    * e aqui o ganho de tempo não compensaria o risco de tomar 429 no meio.
@@ -118,5 +132,5 @@ export function useOrderDetails(credentials: ZfCredentials) {
     return map;
   }, [details]);
 
-  return { details, bulk, load, loadMany, stopBulk, reset, loadedOrders };
+  return { details, bulk, load, prime, loadMany, stopBulk, reset, loadedOrders };
 }

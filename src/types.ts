@@ -151,6 +151,12 @@ export interface ZfOrder extends ZfOrderSummary {
 }
 
 export interface OrderFilters {
+  /**
+   * merchantOrderReference de um pedido específico. Quando preenchido, a busca
+   * deixa de usar GET /orders (período + estados) e vai direto em
+   * GET /orders/:merchantOrderReference, que já devolve os itens.
+   */
+  reference: string;
   /** "YYYY-MM-DD" vindo do <input type="date">; convertido para UTC no envio. */
   createdFrom: string;
   createdTo: string;
